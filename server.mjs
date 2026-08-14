@@ -616,4 +616,19 @@ createServer(async (request, response) => {
   });
   if (request.method === 'HEAD') return response.end();
   createReadStream(filePath).pipe(response);
-}).listen(port, () => console.log(`Site listening on :${port}`));
+}).listen(port, async () => {
+  console.log(`Site listening on :${port}`);
+
+  // Подписку на ответ менеджера нужно восстанавливать и после обычного
+  // перезапуска сайта: данные авторизации приложения сохранены в volume,
+  // а Bitrix24 не всегда повторно вызывает обработчик установки сам.
+  if (!isOpenLineConfigured()) return;
+  try {
+    const store = await getBridgeStore();
+    if (!store.auth) return;
+    await registerOpenLineConnector(store.auth);
+    console.info('Open Line connector and reply event rebound on startup');
+  } catch (error) {
+    console.error('Open Line startup rebind failed:', error.message);
+  }
+});
