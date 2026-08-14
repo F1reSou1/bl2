@@ -232,7 +232,12 @@ async function sendVisitorMessage(chatId, text, options = {}) {
       chat: { id: chatId, name: 'Чат сайта «Близкие люди»', url: openLine.publicUrl }
     }]
   });
-  const openLineSession = result?.DATA?.RESULT?.[0]?.session;
+  const messageResult = result?.DATA?.RESULT?.[0];
+  if (result?.SUCCESS === false || messageResult?.SUCCESS === false) {
+    const details = Array.isArray(messageResult?.ERRORS) ? messageResult.ERRORS.join('; ') : '';
+    throw new Error(details || 'Bitrix24 не принял сообщение для Открытой линии');
+  }
+  const openLineSession = messageResult?.session;
   if (openLineSession) session.bitrixSession = openLineSession;
   session.updatedAt = Date.now();
   await saveBridgeStore();
