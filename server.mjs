@@ -459,15 +459,23 @@ async function handleOpenLineHandler(payload, url) {
       session.managerMessages.push({ id: externalMessageId, text, timestamp: Date.now() });
       session.managerMessages = session.managerMessages.slice(-100);
       session.updatedAt = Date.now();
-      await bitrixOpenLineCall('imconnector.send.status.delivery', {
-        CONNECTOR: openLine.connectorId,
-        LINE: Number(lineId),
-        MESSAGES: [{
-          im: { chat_id: Number(source?.im?.chat_id), message_id: Number(source?.im?.message_id) },
-          message: { id: [externalMessageId], date: Math.floor(Date.now() / 1000) },
-          chat: { id: chatId }
-        }]
-      }, auth);
+      // Сначала сохраняем текст для виджета сайта. Подтверждение Bitrix24 —
+      // служебная операция; его временная ошибка не должна лишать клиента
+      // ответа менеджера.
+      await saveBridgeStore();
+      try {
+        await bitrixOpenLineCall('imconnector.send.status.delivery', {
+          CONNECTOR: openLine.connectorId,
+          LINE: Number(lineId),
+          MESSAGES: [{
+            im: { chat_id: Number(source?.im?.chat_id), message_id: Number(source?.im?.message_id) },
+            message: { id: [externalMessageId], date: Math.floor(Date.now() / 1000) },
+            chat: { id: chatId }
+          }]
+        }, auth);
+      } catch (error) {
+        console.warn('Open line delivery acknowledgement failed:', error.message);
+      }
     }
     await saveBridgeStore();
     return;
