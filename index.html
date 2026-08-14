@@ -162,7 +162,7 @@
       max-width: 760px;
       margin: 0;
       color: var(--hero-ink);
-      font-size: clamp(36px, 5vw, 60px);
+      font-size: clamp(36px, 5vw, 55px);
       line-height: 1.08;
       letter-spacing: -0.045em;
       font-weight: 700;
@@ -1128,10 +1128,601 @@
       }
     }
 
+
+    /* ===== Responsive stabilization: Hero + Awards ===== */
+    /*
+      Desktop сохраняет исходную идею первого экрана: Hero занимает ровно
+      доступную высоту viewport под header. До 980px ничего не переводим
+      в естественную высоту — на невысоких desktop только компактнее
+      раскладываем внутренний контент.
+    */
+    @media (min-width: 981px) {
+      .hero-care {
+        height: calc(100dvh - var(--site-header-height));
+        min-height: calc(100dvh - var(--site-header-height));
+        align-items: center;
+      }
+      .hero-care__shell {
+        width: min(1180px, 100%);
+        height: 100%;
+        min-height: 0;
+      }
+      .hero-care__content,
+      .hero-care__media,
+      .hero-care__photo-card,
+      .hero-care__photo {
+        min-height: 0;
+      }
+      .hero-care__photo-card,
+      .hero-care__photo {
+        height: 100%;
+      }
+    }
+
+    /* Узкий desktop: всё ещё 100dvh и две колонки, просто меньше воздуха. */
+    @media (min-width: 981px) and (max-width: 1240px) {
+      .hero-care__shell {
+        grid-template-columns: minmax(0, 1.08fr) minmax(320px, .92fr);
+        gap: clamp(18px, 2.6vw, 30px);
+        padding: clamp(22px, 3vw, 36px);
+      }
+      .hero-care__title {
+        font-size: clamp(37px, 4.15vw, 50px);
+      }
+      .hero-care__lead {
+        font-size: clamp(17px, 1.5vw, 19px);
+        line-height: 1.5;
+      }
+      .hero-care__btn {
+        padding-inline: 19px;
+      }
+      .hero-care__trust-item {
+        padding: 13px;
+        font-size: 14px;
+      }
+    }
+
+    /* Низкий desktop не ломает 100dvh: ужимаем содержимое вместо height:auto. */
+    @media (min-width: 981px) and (max-height: 680px) {
+      .hero-care {
+        height: calc(100dvh - var(--site-header-height));
+        min-height: calc(100dvh - var(--site-header-height));
+        padding: 8px 16px;
+        align-items: center;
+      }
+      .hero-care__shell {
+        height: 100%;
+        padding: 18px 26px;
+        gap: 24px;
+      }
+      .hero-care__eyebrow {
+        margin-bottom: 10px;
+        padding-block: 6px;
+        font-size: 13px;
+      }
+      .hero-care__title {
+        font-size: clamp(32px, 3.2vw, 43px);
+        line-height: 1.03;
+      }
+      .hero-care__lead {
+        margin-top: 10px;
+        font-size: 15px;
+        line-height: 1.42;
+      }
+      .hero-care__actions {
+        margin-top: 14px;
+      }
+      .hero-care__btn {
+        min-height: 44px;
+        padding: 10px 16px;
+        font-size: 14px;
+      }
+      .hero-care__trust {
+        margin-top: 10px;
+        padding-top: 10px;
+        gap: 8px;
+      }
+      .hero-care__trust-item {
+        min-height: 74px;
+        padding: 9px 10px;
+        gap: 6px;
+        font-size: 12px;
+      }
+      .hero-care__trust-icon {
+        width: 34px;
+        height: 34px;
+        border-radius: 12px;
+      }
+      .hero-care__trust-icon svg {
+        width: 21px;
+        height: 21px;
+      }
+    }
+
+    /* Tablet / iPad mini: Hero становится обычной секцией и очищается от второстепенного. */
+    @media (min-width: 641px) and (max-width: 980px) {
+      .hero-care {
+        min-height: 0;
+        height: auto;
+        align-items: flex-start;
+        padding: 26px 16px 40px;
+      }
+      .hero-care__shell {
+        grid-template-columns: 1fr;
+        gap: 26px;
+        padding: clamp(24px, 5vw, 38px);
+      }
+      .hero-care__content {
+        max-width: 760px;
+      }
+      .hero-care__title {
+        font-size: clamp(38px, 6.1vw, 52px);
+      }
+      .hero-care__trust {
+        display: none;
+      }
+      .hero-care__media,
+      .hero-care__photo-card,
+      .hero-care__photo {
+        min-height: 0;
+      }
+      .hero-care__photo-card {
+        width: 100%;
+        height: auto;
+        aspect-ratio: 16 / 10;
+      }
+      .hero-care__photo {
+        display: block;
+        height: 100%;
+      }
+    }
+
+    @media (max-width: 640px) {
+      .hero-care {
+        min-height: 0;
+        height: auto;
+        align-items: flex-start;
+        padding: 14px 10px 34px;
+      }
+      .hero-care__shell {
+        width: 100%;
+        padding: clamp(15px, 4.4vw, 20px);
+        gap: 20px;
+        border-radius: 24px;
+      }
+      .hero-care__eyebrow {
+        max-width: 100%;
+        margin-bottom: 14px;
+        padding: 8px 11px;
+        font-size: clamp(12px, 3.65vw, 14px);
+        white-space: normal;
+      }
+      .hero-care__title {
+        font-size: clamp(30px, 9.2vw, 40px);
+        line-height: 1.06;
+        letter-spacing: -0.042em;
+        text-wrap: pretty;
+      }
+      .hero-care__lead {
+        margin-top: 16px;
+        font-size: clamp(15px, 4.25vw, 17px);
+        line-height: 1.5;
+      }
+      .hero-care__actions {
+        gap: 10px;
+        margin-top: 20px;
+      }
+      .hero-care__btn {
+        min-height: 52px;
+        padding: 13px 15px;
+        border-radius: 14px;
+        font-size: 15px;
+      }
+      .hero-care__trust {
+        display: none;
+      }
+      .hero-care__media,
+      .hero-care__photo-card,
+      .hero-care__photo {
+        min-height: 0;
+      }
+      .hero-care__photo-card {
+        width: 100%;
+        height: auto;
+        aspect-ratio: 4 / 3;
+        border-radius: 20px;
+      }
+      .hero-care__photo {
+        display: block;
+        width: 100%;
+        height: 100%;
+        object-position: center 32%;
+      }
+      .hero-care__price-card {
+        margin-top: 9px;
+        padding: 14px 15px;
+        gap: 12px;
+        border-radius: 18px;
+      }
+      .hero-care__mini-icon {
+        width: 46px;
+        height: 46px;
+        border-radius: 14px;
+      }
+      .hero-care__mini-value {
+        font-size: 21px;
+      }
+    }
+
+    @media (max-width: 380px) {
+      .hero-care {
+        padding-inline: 8px;
+      }
+      .hero-care__shell {
+        padding: 14px;
+      }
+      .hero-care__title {
+        font-size: clamp(28px, 9vw, 34px);
+      }
+      .hero-care__lead {
+        font-size: 15px;
+      }
+      .hero-care__btn {
+        font-size: 14px;
+      }
+      .hero-care__photo-card {
+        aspect-ratio: 1.18 / 1;
+      }
+    }
+
+    /* Награды и видео теперь занимают ровно ширину своих grid-колонок. */
+    .awards-media-grid {
+      grid-template-columns: minmax(0, .82fr) minmax(0, 1.18fr);
+      gap: clamp(18px, 2.4vw, 28px);
+    }
+    .awards-slider,
+    .vk-video-frame {
+      width: 100%;
+      max-width: 100%;
+      min-width: 0;
+    }
+    .awards-slider {
+      overflow: hidden;
+    }
+    .awards-main {
+      width: 100%;
+      height: auto;
+      aspect-ratio: 4 / 3;
+    }
+    .awards-thumbs {
+      width: 100%;
+      min-width: 0;
+    }
+    .awards-thumb {
+      min-width: 0;
+    }
+    .vk-video-frame {
+      height: clamp(440px, 36vw, 520px);
+      aspect-ratio: auto;
+      align-self: stretch;
+    }
+
+    @media (max-width: 900px) {
+      .awards-media-grid {
+        gap: 20px;
+      }
+      .awards-main {
+        aspect-ratio: 4 / 3;
+        max-height: none;
+      }
+      .vk-video-frame {
+        aspect-ratio: 16 / 9;
+      }
+    }
+
+    @media (max-width: 560px) {
+      .awards-media-grid {
+        gap: 16px;
+      }
+      .awards-main {
+        aspect-ratio: 1 / 1;
+      }
+      .awards-thumbs {
+        gap: 6px;
+      }
+      .awards-thumb {
+        height: clamp(48px, 14vw, 58px);
+      }
+    }
+
     .prose-lite h4 { font-family: 'Nunito', system-ui, sans-serif; font-weight: 800; color: #111827; margin-top: 1rem; }
     .prose-lite ul { list-style: disc; padding-left: 1.25rem; }
     .prose-lite ol { list-style: decimal; padding-left: 1.25rem; }
     .prose-lite li { margin-top: .35rem; }
+
+    /* ===== Final polish: Hero + Awards + Calculator bridge ===== */
+    .hero-care__content {
+      gap: 0;
+    }
+    .hero-care__actions {
+      align-items: stretch;
+    }
+    .hero-care__btn--primary {
+      flex: 1 1 360px;
+      max-width: 470px;
+    }
+    .hero-care__btn--secondary {
+      flex: 0 1 220px;
+      white-space: nowrap;
+    }
+    .hero-care__price-card {
+      max-width: min(100%, 310px);
+    }
+    .hero-care__mini-value {
+      text-wrap: nowrap;
+    }
+    @media (min-width: 981px) and (max-width: 1180px) {
+      .hero-care__shell {
+        grid-template-columns: minmax(0, 1.04fr) minmax(320px, .96fr);
+      }
+      .hero-care__content {
+        justify-content: center;
+      }
+      .hero-care__actions {
+        gap: 12px;
+      }
+      .hero-care__btn--primary {
+        flex-basis: 100%;
+        max-width: none;
+      }
+      .hero-care__btn--secondary {
+        flex: 0 1 240px;
+      }
+      .hero-care__price-card {
+        right: 14px;
+        bottom: 14px;
+        min-width: 228px;
+        padding: 16px 18px;
+      }
+    }
+    @media (min-width: 981px) and (max-height: 760px) {
+      .hero-care__actions {
+        margin-top: 16px;
+      }
+      .hero-care__btn--primary {
+        max-width: 420px;
+      }
+      .hero-care__price-card {
+        gap: 12px;
+        min-width: 220px;
+        padding: 14px 16px;
+      }
+      .hero-care__mini-icon {
+        width: 46px;
+        height: 46px;
+      }
+      .hero-care__mini-value {
+        font-size: 21px;
+      }
+    }
+    @media (min-width: 641px) and (max-width: 980px) {
+      .hero-care__actions {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+      }
+      .hero-care__btn--primary {
+        max-width: none;
+      }
+      .hero-care__price-card {
+        max-width: 100%;
+      }
+    }
+    @media (max-width: 640px) {
+      .hero-care__shell {
+        gap: 18px;
+      }
+      .hero-care__lead {
+        max-width: 34ch;
+      }
+      .hero-care__actions {
+        display: grid;
+        grid-template-columns: 1fr;
+      }
+      .hero-care__btn--primary,
+      .hero-care__btn--secondary {
+        flex: 1 1 auto;
+        max-width: none;
+        white-space: normal;
+      }
+      .hero-care__price-card {
+        padding: 13px 14px;
+      }
+      .hero-care__mini-label {
+        font-size: 12px;
+      }
+      .hero-care__mini-value {
+        font-size: 20px;
+      }
+    }
+
+    .calc-situations-bridge {
+      padding: 12px 14px;
+      border: 1px solid rgba(165, 182, 141, .26);
+      border-radius: 16px;
+      background: linear-gradient(180deg, rgba(242, 245, 240, .86), rgba(255, 255, 255, .98));
+    }
+    .calc-situations-bridge__label {
+      color: #35553a;
+      font-size: 12px;
+      line-height: 1.35;
+      font-weight: 800;
+      letter-spacing: .015em;
+      text-transform: uppercase;
+    }
+    .calc-situations-bridge__list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 8px;
+    }
+    .calc-situations-bridge__item {
+      display: inline-flex;
+      align-items: center;
+      min-height: 28px;
+      padding: 4px 10px;
+      border-radius: 999px;
+      border: 1px solid rgba(79, 111, 82, .14);
+      background: #fff;
+      color: #2d4530;
+      font-size: 12px;
+      line-height: 1.3;
+      font-weight: 600;
+    }
+    @media (max-width: 640px) {
+      .calc-situations-bridge {
+        padding: 10px 12px;
+      }
+      .calc-situations-bridge__label,
+      .calc-situations-bridge__item {
+        font-size: 11px;
+      }
+    }
+
+    .awards-media-grid {
+      grid-template-columns: minmax(0, .62fr) minmax(0, 1.38fr);
+      align-items: stretch;
+      gap: clamp(20px, 2.6vw, 32px);
+    }
+    .awards-slider,
+    .vk-video-frame {
+      height: clamp(440px, 36vw, 520px);
+    }
+    .awards-slider {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      height: clamp(440px, 36vw, 520px);
+      padding: 0;
+      border: 0;
+      border-radius: 0;
+      background: transparent;
+      box-shadow: none;
+      overflow: hidden;
+    }
+    .awards-main {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex: 1 1 auto;
+      min-height: 0;
+      height: auto;
+      aspect-ratio: auto;
+      border-radius: 22px;
+      background: #f1ece3;
+      border: 1px solid rgba(214, 199, 171, .65);
+      box-shadow: none;
+    }
+    .awards-open {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 100%;
+      height: 100%;
+      padding: 0;
+      border-radius: 16px;
+      background: transparent;
+    }
+    .awards-main img {
+      width: auto;
+      max-width: 100%;
+      height: auto;
+      max-height: 100%;
+      object-fit: contain;
+      object-position: center;
+      filter: none;
+    }
+    .awards-arrow {
+      width: 42px;
+      height: 42px;
+      background: rgba(36, 59, 58, .56);
+    }
+    .awards-thumbs {
+      display: flex;
+      align-items: stretch;
+      gap: 8px;
+      flex: 0 0 auto;
+      overflow-x: auto;
+      overflow-y: hidden;
+      padding: 0 0 2px;
+      scrollbar-width: none;
+      -ms-overflow-style: none;
+      scroll-snap-type: x proximity;
+    }
+    .awards-thumbs::-webkit-scrollbar {
+      display: none;
+    }
+    .awards-thumb {
+      flex: 0 0 54px;
+      height: 72px;
+      padding: 3px;
+      border-radius: 10px;
+      border: 1px solid rgba(214, 199, 171, .92);
+      background: #fff;
+      opacity: 1;
+      box-shadow: none;
+      scroll-snap-align: start;
+    }
+    .awards-thumb:hover,
+    .awards-thumb.is-active {
+      border-color: #4F6F52;
+      box-shadow: none;
+      transform: translateY(-1px);
+    }
+    .awards-thumb img {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      object-position: center;
+      border-radius: 7px;
+      background: #fff;
+    }
+    .vk-video-frame {
+      height: clamp(440px, 36vw, 520px);
+      aspect-ratio: auto;
+      align-self: stretch;
+    }
+    @media (max-width: 900px) {
+      .awards-media-grid {
+        grid-template-columns: 1fr;
+      }
+      .awards-slider,
+      .vk-video-frame {
+        height: auto;
+      }
+      .awards-main {
+        aspect-ratio: 1.02 / 1.02;
+        min-height: 0;
+      }
+      .awards-thumb {
+        flex-basis: 58px;
+        height: 78px;
+      }
+    }
+    @media (max-width: 560px) {
+      .awards-main {
+        aspect-ratio: .98 / 1.08;
+        border-radius: 18px;
+      }
+      .awards-arrow {
+        width: 38px;
+        height: 38px;
+      }
+      .awards-thumb {
+        flex-basis: 52px;
+        height: 72px;
+        border-radius: 9px;
+      }
+    }
   </style>
 
   <!-- Schema.org: LocalBusiness -->
@@ -2104,10 +2695,6 @@
 
       </div>
 
-      <div id="selectedSituationsSummary" class="hidden mt-8 rounded-2xl border border-brand-200 bg-white/80 px-5 py-4" aria-live="polite">
-        <p class="text-sm font-semibold text-gray-700">Вы выбрали:</p>
-        <ul id="selectedSituationsList" class="mt-3 flex flex-wrap gap-2"></ul>
-      </div>
       <p class="text-center text-sm text-gray-400 mt-8">Отметьте подходящие ситуации — мы учтём их при подборе и предложим подходящий вариант ухода</p>
     </div>
   </section>
@@ -3111,6 +3698,11 @@
               <p class="text-lg font-bold text-gray-900 mb-2">Оставьте заявку</p>
               <p class="text-sm text-gray-600 leading-relaxed mb-4">Стоимость указана для г. Владивосток. Базовая стоимость не включает надбавки и усложняющие факторы. Если продолжительность рабочего времени больше 7 часов, заказчик обеспечивает сиделку питанием.</p>
 
+              <div id="calcSituationsBridge" class="calc-situations-bridge hidden mb-4" aria-live="polite">
+                <p class="calc-situations-bridge__label">Учтём в заявке:</p>
+                <ul id="calcSituationsBridgeList" class="calc-situations-bridge__list"></ul>
+              </div>
+
               <div class="space-y-4">
                 <div>
                   <label class="block text-sm font-semibold text-gray-700 mb-1.5">Ваше имя</label>
@@ -3476,18 +4068,19 @@
 
   function renderSelectedCareSituations() {
     const selected = getSelectedCareSituations();
-    const summary = document.getElementById('selectedSituationsSummary');
-    const list = document.getElementById('selectedSituationsList');
-    if (!summary || !list) return;
+    const calcBridge = document.getElementById('calcSituationsBridge');
+    const calcBridgeList = document.getElementById('calcSituationsBridgeList');
 
-    list.replaceChildren();
+    if (!calcBridge || !calcBridgeList) return;
+
+    calcBridgeList.replaceChildren();
     selected.forEach(function(text) {
       const item = document.createElement('li');
-      item.className = 'rounded-full bg-brand-50 px-3 py-1.5 text-sm text-brand-800';
+      item.className = 'calc-situations-bridge__item';
       item.textContent = text;
-      list.appendChild(item);
+      calcBridgeList.appendChild(item);
     });
-    summary.classList.toggle('hidden', selected.length === 0);
+    calcBridge.classList.toggle('hidden', selected.length === 0);
   }
 
   function buildCareLeadPayload() {
@@ -5218,7 +5811,8 @@
       AWAITING_CLIENT_PHONE: 'awaiting_client_phone',
       COLLECTING_RECRUITMENT: 'collecting_recruitment',
       AWAITING_RECRUITMENT_PHONE: 'awaiting_recruitment_phone',
-      LEAD_CREATED: 'lead_created'
+      LEAD_CREATED: 'lead_created',
+      LIVE_MANAGER: 'live_manager'
     };
 
     const chatState = {
@@ -5233,6 +5827,19 @@
     // Backward-compatible flags for old inline handlers / tests.
     let chatPendingManagerPhone = false;
     let chatPendingManagerReason = '';
+    const chatTranscript = [{ role: 'bot', text: 'Здравствуйте! Я помогу подобрать сиделку для вашего близкого. Расскажите, что вас беспокоит?', timestamp: Date.now() }];
+    const managerChat = { chatId: '', lastMessageAt: 0, pollTimer: null, phoneRequested: false, noReplyTimer: null };
+
+    function recordChatMessage(role, text) {
+      const safeText = String(text || '').trim();
+      if (!safeText) return;
+      chatTranscript.push({ role, text: safeText.slice(0, 2500), timestamp: Date.now() });
+      if (chatTranscript.length > 100) chatTranscript.splice(0, chatTranscript.length - 100);
+    }
+
+    function isLiveManagerChat() {
+      return chatState.mode === CHAT_MODES.LIVE_MANAGER && Boolean(managerChat.chatId);
+    }
 
     function toggleChat() {
       const panel = document.getElementById('chatPanel');
@@ -6491,6 +7098,7 @@
       row.innerHTML = '<div class="chat-message chat-message--user"></div>';
       row.querySelector('.chat-message').textContent = text;
       container.appendChild(row);
+      recordChatMessage('client', text);
       scrollChatToBottom();
     }
 
@@ -6505,6 +7113,7 @@
       row.querySelector('.chat-avatar').src = CHAT_MASCOTS[safeMood] || CHAT_MASCOTS.default;
       row.querySelector('.chat-message').textContent = text;
       container.appendChild(row);
+      recordChatMessage('bot', text);
 
       if (actions && actions.length) {
         const actionsWrap = document.createElement('div');
@@ -6520,6 +7129,20 @@
         container.appendChild(actionsWrap);
       }
 
+      scrollChatToBottom();
+    }
+
+    function appendManagerMessage(text) {
+      const container = document.getElementById('chatMessages');
+      const row = document.createElement('div');
+      row.className = 'chat-row chat-row--bot';
+      row.innerHTML = '<img class="chat-avatar" alt=""><div class="chat-message chat-message--bot"></div>';
+      row.querySelector('.chat-avatar').src = CHAT_MASCOTS.listen || CHAT_MASCOTS.default;
+      row.querySelector('.chat-message').textContent = String(text || '')
+        .replace(/\[br\]/gi, '\n')
+        .replace(/\[\/?(?:b|i|u|s|url[^\]]*)\]/gi, '');
+      container.appendChild(row);
+      recordChatMessage('manager', text);
       scrollChatToBottom();
     }
 
@@ -6867,14 +7490,92 @@
 
     function requestManagerFromChat(reason) {
       hideQuickReplies();
-      setChatMode(CHAT_MODES.AWAITING_CLIENT_PHONE, 'client', reason || 'manual');
-      appendBotMessage('Оставьте номер телефона. Передам менеджеру то, что уже обсудили: состояние подопечного, график и ваши вопросы. Можно написать “отмена”, если не хотите оставлять контакт.', 'listen', [
-        { label: 'Отмена', handler: function() { appendUserMessage('Отмена'); processChatText('Отмена'); } },
-        { label: 'Зачем телефон?', handler: function() { appendUserMessage('Зачем телефон?'); processChatText('Зачем телефон?'); } }
-      ]);
+      if (isLiveManagerChat()) {
+        appendBotMessage('Вы уже в диалоге с менеджером. Напишите сообщение — оно сразу попадёт в Открытую линию.', 'listen');
+        return;
+      }
+      startLiveManagerChat(reason || 'manual');
+    }
+
+    async function startLiveManagerChat(reason) {
+      appendBotMessage('Подключаю менеджера. Передаю ему историю этого диалога, чтобы не пришлось рассказывать всё сначала.', 'listen');
+      try {
+        const response = await fetch('/api/chat/handoff', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ reason, transcript: chatTranscript, context: chatState.context })
+        });
+        const body = await response.json().catch(function() { return {}; });
+        if (!response.ok || !body.ok) {
+          const error = new Error(body.code || 'UNAVAILABLE');
+          error.code = body.code;
+          throw error;
+        }
+        managerChat.chatId = body.chatId;
+        managerChat.lastMessageAt = 0;
+        managerChat.phoneRequested = false;
+        setChatMode(CHAT_MODES.LIVE_MANAGER, 'client', reason);
+        appendBotMessage('Готово. Менеджер видит контекст и ответит здесь, в этом окне. Если в течение 10 минут ответа не будет, я попрошу номер для обратной связи.', 'care');
+        pollManagerMessages();
+        managerChat.noReplyTimer = window.setTimeout(function() {
+          if (!isLiveManagerChat() || managerChat.lastMessageAt) return;
+          managerChat.phoneRequested = true;
+          appendBotMessage('Менеджер пока не ответил. Оставьте номер телефона — передам его в этот же диалог для обратной связи.', 'listen');
+        }, 10 * 60 * 1000);
+      } catch (error) {
+        setChatMode(CHAT_MODES.AWAITING_CLIENT_PHONE, 'client', reason || 'manual');
+        const afterHours = error?.code === 'AFTER_HOURS';
+        appendBotMessage(afterHours
+          ? 'Менеджеры на связи ежедневно с 09:00 до 20:00 по Владивостоку. Оставьте номер телефона — свяжемся в рабочее время.'
+          : 'Сейчас не удалось подключить линию менеджера. Оставьте номер телефона — передам уже собранную информацию менеджеру.', 'listen', [
+          { label: 'Отмена', handler: function() { appendUserMessage('Отмена'); processChatText('Отмена'); } },
+          { label: 'Зачем телефон?', handler: function() { appendUserMessage('Зачем телефон?'); processChatText('Зачем телефон?'); } }
+        ]);
+      }
+    }
+
+    async function sendLiveManagerMessage(text) {
+      if (!isLiveManagerChat()) return;
+      try {
+        const response = await fetch('/api/chat/message', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ chatId: managerChat.chatId, text })
+        });
+        if (!response.ok) throw new Error('Не удалось отправить');
+      } catch {
+        appendBotMessage('Сообщение пока не ушло менеджеру. Повторите отправку через несколько секунд или оставьте номер телефона.', 'care');
+      }
+    }
+
+    async function pollManagerMessages() {
+      if (!isLiveManagerChat()) return;
+      try {
+        const response = await fetch('/api/chat/messages?chatId=' + encodeURIComponent(managerChat.chatId) + '&after=' + managerChat.lastMessageAt, { cache: 'no-store' });
+        const body = await response.json().catch(function() { return {}; });
+        if (response.ok && Array.isArray(body.messages)) {
+          body.messages.forEach(function(message) {
+            managerChat.lastMessageAt = Math.max(managerChat.lastMessageAt, Number(message.timestamp) || 0);
+            appendManagerMessage(message.text);
+          });
+          if (body.messages.length && managerChat.noReplyTimer) {
+            window.clearTimeout(managerChat.noReplyTimer);
+            managerChat.noReplyTimer = null;
+          }
+        }
+      } catch {
+        // Следующая проверка повторит запрос; не отвлекаем посетителя технической ошибкой.
+      }
+      if (isLiveManagerChat()) managerChat.pollTimer = window.setTimeout(pollManagerMessages, 5000);
     }
 
     async function submitManagerPhoneFromChat(phone, originalMessage) {
+      if (isLiveManagerChat()) {
+        await sendLiveManagerMessage('Телефон клиента для обратной связи: ' + normalizePhone(phone));
+        managerChat.phoneRequested = false;
+        appendBotMessage('Номер передан менеджеру в этот диалог.', 'care');
+        return;
+      }
       const isRecruitment = chatState.mode === CHAT_MODES.AWAITING_RECRUITMENT_PHONE || chatState.leadType === 'recruitment';
       await sendLead({
         form: 'chat_widget',
@@ -6915,10 +7616,30 @@
       input.value = '';
       hideQuickReplies();
       appendUserMessage(text);
+      if (isLiveManagerChat()) {
+        if (managerChat.phoneRequested && isLikelyContactPhone(text)) {
+          submitManagerPhoneFromChat(text).catch(function() {
+            appendBotMessage('Не получилось передать номер. Попробуйте ещё раз или позвоните нам: +7 (953) 206-06-61.', 'care');
+          });
+        } else {
+          sendLiveManagerMessage(text);
+        }
+        return;
+      }
       processChatText(text);
     }
 
     function processChatText(text) {
+      if (isLiveManagerChat()) {
+        if (managerChat.phoneRequested && isLikelyContactPhone(text)) {
+          submitManagerPhoneFromChat(text).catch(function() {
+            appendBotMessage('Не получилось передать номер. Попробуйте ещё раз или позвоните нам: +7 (953) 206-06-61.', 'care');
+          });
+        } else {
+          sendLiveManagerMessage(text);
+        }
+        return;
+      }
       setTimeout(function() {
         const value = normalizeChatText(text);
         prepareClientCaseContext(value);
