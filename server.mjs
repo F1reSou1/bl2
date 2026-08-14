@@ -270,6 +270,63 @@ async function startManagerChat(payload) {
   return { chatId };
 }
 
+function isOperatorMessage(message, users) {
+  const senderId = cleanText(message?.senderid, 40);
+  const sender = users?.[senderId];
+  // Сообщения клиента в Открытой линии имеют технического пользователя
+  // коннектора. Оставляем только реальные сообщения сотрудников.
+  return Boolean(
+    senderId &&
+    /^\d+$/.test(senderId) &&
+    senderId !== '0' &&
+    sender &&
+    sender.connector !== true &&
+    cleanText(sender.externalAuthId, 100) !== 'imconnector'
+  );
+}
+
+async function syncManagerMessages(chatId) {
+  const store = await getBridgeStore();
+  const session = store.sessions[chatId];
+  const bitrixSession = session?.bitrixSession;
+  if (!session || !bitrixSession?.CHAT_ID) return;
+
+  const now = Date.now();
+  // Виджет опрашивает сервер часто; не расходуем лимит REST Битрикс24 чаще,
+  // чем один раз в две секунды для одного живого диалога.
+  if (now - Number(session.lastManagerSyncAt || 0) < 2000) return;
+  session.lastManagerSyncAt = now;
+
+  try {
+    const history = await bitrixOpenLineCall('imopenlines.session.history.get', {
+      SESSION_ID: Number(bitrixSession.ID) || undefined,
+      CHAT_ID: Number(bitrixSession.CHAT_ID)
+    });
+    const users = history?.users && typeof history.users === 'object' ? history.users : {};
+    const knownIds = new Set(Array.isArray(session.managerBitrixMessageIds) ? session.managerBitrixMessageIds.map(String) : []);
+    const messages = indexedValues(history?.message)
+      .filter(message => isOperatorMessage(message, users))
+      .sort((left, right) => Number(left?.id || 0) - Number(right?.id || 0));
+
+    session.managerMessages = Array.isArray(session.managerMessages) ? session.managerMessages : [];
+    for (const message of messages) {
+      const messageId = cleanText(message?.id, 100);
+      const text = cleanText(message?.text, 12000);
+      if (!messageId || !text || knownIds.has(messageId)) continue;
+      const timestamp = Date.parse(cleanText(message?.date, 100)) || now;
+      session.managerMessages.push({ id: `operator_${messageId}`, text, timestamp });
+      knownIds.add(messageId);
+    }
+    session.managerBitrixMessageIds = Array.from(knownIds).slice(-300);
+    session.managerMessages = session.managerMessages.slice(-100);
+    session.updatedAt = now;
+    await saveBridgeStore();
+  } catch (error) {
+    console.warn('Open Line manager history sync failed:', error.message);
+    await saveBridgeStore();
+  }
+}
+
 async function bitrixCall(method, payload) {
   const response = await fetch(`${bitrixWebhookUrl}/${method}.json`, {
     method: 'POST',
@@ -469,6 +526,10 @@ async function handleOpenLineHandler(payload, url) {
       if (!text) continue;
       const externalMessageId = `operator_${randomBytes(12).toString('base64url')}`;
       session.managerMessages = Array.isArray(session.managerMessages) ? session.managerMessages : [];
+      session.managerBitrixMessageIds = Array.isArray(session.managerBitrixMessageIds) ? session.managerBitrixMessageIds : [];
+      const bitrixMessageId = cleanText(source?.im?.message_id, 100);
+      if (bitrixMessageId) session.managerBitrixMessageIds.push(bitrixMessageId);
+      session.managerBitrixMessageIds = Array.from(new Set(session.managerBitrixMessageIds.map(String))).slice(-300);
       session.managerMessages.push({ id: externalMessageId, text, timestamp: Date.now() });
       session.managerMessages = session.managerMessages.slice(-100);
       session.updatedAt = Date.now();
@@ -594,6 +655,7 @@ createServer(async (request, response) => {
   if (request.method === 'GET' && url.pathname === '/api/chat/messages') {
     const chatId = cleanChatId(url.searchParams.get('chatId'));
     const after = Number(url.searchParams.get('after') || 0);
+    await syncManagerMessages(chatId);
     const store = await getBridgeStore();
     const session = store.sessions[chatId];
     if (!session) return json(response, 404, { ok: false });
