@@ -395,15 +395,19 @@ async function registerOpenLineConnector(auth) {
     ICON_DISABLED: { ...connectorIcon, COLOR: '#a0a0a0' },
     PLACEMENT_HANDLER: handlerUrl
   }, auth);
+  // После обновления приложения Битрикс может оставить старую подписку
+  // обработчика. Снимаем только нашу точную пару «событие + URL» и ставим
+  // заново, не затрагивая обработчики других интеграций.
   try {
-    await bitrixOpenLineCall('event.bind', {
+    await bitrixOpenLineCall('event.unbind', {
       event: 'OnImConnectorMessageAdd', handler: handlerUrl
     }, auth);
   } catch (error) {
-    // Повторная установка приложения не должна ломаться: Bitrix24 не даёт
-    // второй раз привязать тот же обработчик события.
-    if (!/handler already binded/i.test(error.message)) throw error;
+    console.warn('Open line event unbind skipped:', error.message);
   }
+  await bitrixOpenLineCall('event.bind', {
+    event: 'OnImConnectorMessageAdd', handler: handlerUrl
+  }, auth);
 
   // В Bitrix24 у портала уже настроены каналы (формы, мессенджеры) на одну
   // Открытую линию. Для чата сайта используем эту же первую линию: тогда он
