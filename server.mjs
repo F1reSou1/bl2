@@ -450,6 +450,15 @@ async function activateOpenLine(lineId, activeStatus, auth) {
 async function handleOpenLineHandler(payload, url) {
   const auth = getBitrixRequestAuth(payload, url);
   const store = await getBridgeStore();
+  if (payload?.event) {
+    const incomingMessages = indexedValues(payload?.data?.MESSAGES);
+    console.info('Open line handler event:', {
+      event: cleanText(payload.event, 100),
+      connector: cleanText(payload?.data?.CONNECTOR, 100),
+      messages: incomingMessages.length,
+      chatIds: incomingMessages.map(message => cleanChatId(message?.chat?.id)).filter(Boolean)
+    });
+  }
   if (payload.event === 'ONIMCONNECTORMESSAGEADD' && payload?.data?.CONNECTOR === openLine.connectorId) {
     const lineId = cleanText(payload?.data?.LINE, 40) || store.lineId;
     for (const source of indexedValues(payload?.data?.MESSAGES)) {
