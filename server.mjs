@@ -381,9 +381,15 @@ async function registerOpenLineConnector(auth) {
     ICON_DISABLED: { ...connectorIcon, COLOR: '#a0a0a0' },
     PLACEMENT_HANDLER: handlerUrl
   }, auth);
-  await bitrixOpenLineCall('event.bind', {
-    event: 'OnImConnectorMessageAdd', handler: handlerUrl
-  }, auth);
+  try {
+    await bitrixOpenLineCall('event.bind', {
+      event: 'OnImConnectorMessageAdd', handler: handlerUrl
+    }, auth);
+  } catch (error) {
+    // Повторная установка приложения не должна ломаться: Bitrix24 не даёт
+    // второй раз привязать тот же обработчик события.
+    if (!/handler already binded/i.test(error.message)) throw error;
+  }
 }
 
 async function handleOpenLineHandler(payload, url) {
@@ -428,7 +434,7 @@ async function handleOpenLineHandler(payload, url) {
     await bitrixOpenLineCall('imconnector.activate', {
       CONNECTOR: openLine.connectorId,
       LINE: Number(lineId),
-      ACTIVE: Number(options?.ACTIVE_STATUS || 0)
+      ACTIVE: Number(options?.ACTIVE_STATUS ?? 1)
     }, auth);
     await bitrixOpenLineCall('imconnector.connector.data.set', {
       CONNECTOR: openLine.connectorId,
@@ -481,7 +487,12 @@ createServer(async (request, response) => {
     try {
       if (!isOpenLineConfigured()) throw new Error('Сервер ещё не настроен для локального приложения');
       if (url.searchParams.get('token') !== openLine.callbackToken) throw new Error('Недействительный токен обработчика');
-      await handleOpenLineHandler(request.method === 'POST' ? await readBody(request) : {}, url);
+      // При открытии настроек коннектора Bitrix24 передаёт параметры линии в
+      // query string, а не в теле запроса. Объединяем оба варианта.
+      const payload = request.method === 'POST'
+        ? await readBody(request)
+        : Object.fromEntries(url.searchParams.entries());
+      await handleOpenLineHandler(payload, url);
       return json(response, 200, { ok: true });
     } catch (error) {
       console.error('Open line handler failed:', error.message);
