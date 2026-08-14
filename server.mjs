@@ -390,6 +390,43 @@ async function registerOpenLineConnector(auth) {
     // второй раз привязать тот же обработчик события.
     if (!/handler already binded/i.test(error.message)) throw error;
   }
+
+  // В Bitrix24 у портала уже настроены каналы (формы, мессенджеры) на одну
+  // Открытую линию. Для чата сайта используем эту же первую линию: тогда он
+  // попадает в ту же очередь менеджеров, а не создаёт отдельный маршрут.
+  const store = await getBridgeStore();
+  if (store.lineId) return;
+  const result = await bitrixOpenLineCall('imopenlines.config.list.get', {
+    PARAMS: {
+      select: ['ID', 'ACTIVE'],
+      order: { ID: 'asc' },
+      limit: 1
+    },
+    OPTIONS: {}
+  }, auth);
+  const lines = Array.isArray(result) ? result : Object.values(result || {});
+  const lineId = cleanText(lines[0]?.ID, 40);
+  if (!lineId) throw new Error('В Bitrix24 не найдена Открытая линия для чата сайта');
+  await activateOpenLine(lineId, 1, auth);
+  store.lineId = lineId;
+  await saveBridgeStore();
+}
+
+async function activateOpenLine(lineId, activeStatus, auth) {
+  await bitrixOpenLineCall('imconnector.activate', {
+    CONNECTOR: openLine.connectorId,
+    LINE: Number(lineId),
+    ACTIVE: Number(activeStatus ?? 1)
+  }, auth);
+  await bitrixOpenLineCall('imconnector.connector.data.set', {
+    CONNECTOR: openLine.connectorId,
+    LINE: Number(lineId),
+    DATA: {
+      ID: `${openLine.connectorId}_line_${lineId}`,
+      URL_IM: openLine.publicUrl,
+      NAME: 'Чат сайта «Близкие люди»'
+    }
+  }, auth);
 }
 
 async function handleOpenLineHandler(payload, url) {
@@ -431,20 +468,7 @@ async function handleOpenLineHandler(payload, url) {
     }
     const lineId = cleanText(options?.LINE, 40);
     if (!lineId || !auth) throw new Error('Bitrix24 не передал параметры Открытой линии');
-    await bitrixOpenLineCall('imconnector.activate', {
-      CONNECTOR: openLine.connectorId,
-      LINE: Number(lineId),
-      ACTIVE: Number(options?.ACTIVE_STATUS ?? 1)
-    }, auth);
-    await bitrixOpenLineCall('imconnector.connector.data.set', {
-      CONNECTOR: openLine.connectorId,
-      LINE: Number(lineId),
-      DATA: {
-        ID: `${openLine.connectorId}_line_${lineId}`,
-        URL_IM: openLine.publicUrl,
-        NAME: 'Чат сайта «Близкие люди»'
-      }
-    }, auth);
+    await activateOpenLine(lineId, options?.ACTIVE_STATUS, auth);
     store.lineId = lineId;
     await saveBridgeStore();
   }
