@@ -57,6 +57,15 @@ function cleanChatId(value) {
   return cleanText(value, 100).replace(/[^a-zA-Z0-9_-]/g, '');
 }
 
+// Bitrix24 передаёт POST form-data с индексами вроде MESSAGES[0]. После
+// разбора формы это объект { 0: {...} }, а не JavaScript-массив. Нормализуем
+// оба представления, иначе ответы операторов тихо теряются на входе.
+function indexedValues(value) {
+  if (Array.isArray(value)) return value;
+  if (value && typeof value === 'object') return Object.values(value);
+  return [];
+}
+
 function isOpenLineConfigured() {
   return Boolean(openLine.appClientId && openLine.appClientSecret && openLine.callbackToken && openLine.publicUrl);
 }
@@ -439,7 +448,7 @@ async function handleOpenLineHandler(payload, url) {
   const store = await getBridgeStore();
   if (payload.event === 'ONIMCONNECTORMESSAGEADD' && payload?.data?.CONNECTOR === openLine.connectorId) {
     const lineId = cleanText(payload?.data?.LINE, 40) || store.lineId;
-    for (const source of Array.isArray(payload?.data?.MESSAGES) ? payload.data.MESSAGES : []) {
+    for (const source of indexedValues(payload?.data?.MESSAGES)) {
       const chatId = cleanChatId(source?.chat?.id);
       const session = store.sessions[chatId];
       if (!session) continue;
