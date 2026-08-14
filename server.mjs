@@ -545,12 +545,19 @@ createServer(async (request, response) => {
   if ((request.method === 'POST' || request.method === 'GET') && url.pathname === '/api/bitrix/openline/handler') {
     try {
       if (!isOpenLineConfigured()) throw new Error('Сервер ещё не настроен для локального приложения');
-      if (url.searchParams.get('token') !== openLine.callbackToken) throw new Error('Недействительный токен обработчика');
       // При открытии настроек коннектора Bitrix24 передаёт параметры линии в
       // query string, а не в теле запроса. Объединяем оба варианта.
       const payload = request.method === 'POST'
         ? await readBody(request)
         : Object.fromEntries(url.searchParams.entries());
+      if (url.searchParams.get('token') !== openLine.callbackToken) {
+        console.warn('Open line handler rejected request:', {
+          event: cleanText(payload?.event, 100),
+          connector: cleanText(payload?.data?.CONNECTOR, 100),
+          hasToken: Boolean(url.searchParams.get('token'))
+        });
+        throw new Error('Недействительный токен обработчика');
+      }
       await handleOpenLineHandler(payload, url);
       return json(response, 200, { ok: true });
     } catch (error) {
