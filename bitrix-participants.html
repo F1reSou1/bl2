@@ -69,7 +69,7 @@
   <script>
     (async () => {
       const roleDefinitions = {
-        customer: { title: 'Заказчик', description: 'Обращается, принимает решения и оплачивает услугу.', typeId: 'CLIENT', field: 'CONTACT_ID' },
+        customer: { title: 'Заказчик', description: 'Обращается, принимает решения и оплачивает услугу.', typeId: 'CLIENT', binding: 'primary-contact' },
         recipient: { title: 'Подопечный', description: 'Человек, которому требуется уход.', typeId: 'SUPPLIER', field: 'UF_CRM_CARE_RECIPIENT' },
         executor: { title: 'Сиделка / исполнитель', description: 'Назначенный исполнитель по сделке.', typeId: 'PARTNER', field: 'UF_CRM_CARE_EXECUTOR' }
       };
@@ -136,8 +136,12 @@
 
       async function refresh() {
         deal = await call('crm.deal.get', { id: dealId });
+        const contactBindings = await call('crm.deal.contact.items.get', { id: dealId });
+        const primaryContact = (Array.isArray(contactBindings) ? contactBindings : [])
+          .find(binding => binding.IS_PRIMARY === 'Y')
+          || (Array.isArray(contactBindings) ? contactBindings[0] : null);
         const values = {
-          customer: deal.CONTACT_ID,
+          customer: primaryContact?.CONTACT_ID,
           recipient: deal.UF_CRM_CARE_RECIPIENT,
           executor: deal.UF_CRM_CARE_EXECUTOR
         };
@@ -158,10 +162,23 @@
 
       async function assignContact(id, updateType) {
         if (updateType) await call('crm.contact.update', { id, fields: { TYPE_ID: activeRole.typeId } });
-        const fields = activeRole.field === 'CONTACT_ID'
-          ? { CONTACT_ID: id }
-          : { [activeRole.field]: `C_${id}` };
-        await call('crm.deal.update', { id: dealId, fields });
+        if (activeRole.binding === 'primary-contact') {
+          const currentBindings = await call('crm.deal.contact.items.get', { id: dealId });
+          const bindings = Array.isArray(currentBindings) ? currentBindings : [];
+          const selectedBinding = bindings.find(binding => Number(binding.CONTACT_ID) === id);
+          const otherBindings = bindings.filter(binding => Number(binding.CONTACT_ID) !== id);
+          const items = [
+            { CONTACT_ID: id, IS_PRIMARY: 'Y', SORT: Number(selectedBinding?.SORT) || 10 },
+            ...otherBindings.map((binding, index) => ({
+              CONTACT_ID: Number(binding.CONTACT_ID),
+              IS_PRIMARY: 'N',
+              SORT: Number(binding.SORT) || (index + 2) * 10
+            }))
+          ];
+          await call('crm.deal.contact.items.set', { id: dealId, items });
+        } else {
+          await call('crm.deal.update', { id: dealId, fields: { [activeRole.field]: `C_${id}` } });
+        }
         dialog.close();
         setStatus(`${activeRole.title}: контакт назначен.`);
         await refresh();
