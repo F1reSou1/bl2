@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Контакт заказчика — установка</title>
+  <title>Участники сделки — установка</title>
   <style>
     body { margin: 0; font: 15px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #1f2937; background: #f7faf9; }
     main { max-width: 560px; margin: 44px auto; padding: 28px; background: #fff; border: 1px solid #d7e8e2; border-radius: 16px; box-shadow: 0 12px 30px rgba(10, 113, 100, .08); }
@@ -15,7 +15,7 @@
 </head>
 <body>
   <main>
-    <h1>Контакт заказчика</h1>
+    <h1>Участники сделки</h1>
     <p>Добавляю вкладку для заказчика, подопечного и исполнителя, а также нужные поля сделки.</p>
     <div id="status" class="status">Подключаю приложение…</div>
   </main>
@@ -50,8 +50,8 @@
         await call(b24, 'placement.bind', {
           PLACEMENT: 'CRM_DEAL_DETAIL_TAB',
           HANDLER: widgetUrl,
-          TITLE: 'Контакт заказчика',
-          LANG_ALL: { ru: { TITLE: 'Контакт заказчика' } }
+          TITLE: 'Участники сделки',
+          LANG_ALL: { ru: { TITLE: 'Участники сделки' } }
         });
 
         const existing = await call(b24, 'crm.deal.userfield.list', { order: { ID: 'ASC' } });
@@ -71,7 +71,7 @@
           });
         }
         await b24.installFinish();
-        setStatus('Готово. В карточке сделки появилась вкладка «Контакт заказчика».');
+        setStatus('Готово. В карточке сделки появилась вкладка «Участники сделки».');
       } catch (error) {
         console.error(error);
         setStatus(`Не удалось установить приложение: ${error.message || 'неизвестная ошибка'}`, true);
