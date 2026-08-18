@@ -193,15 +193,20 @@
         const versionKey = `customer-contact-section-${categoryId}`;
         if (sessionStorage.getItem(versionKey)) return;
         const extras = { dealCategoryId: categoryId };
-        const configuration = await call('crm.deal.details.configuration.get', { scope: 'C', extras });
-        if (!Array.isArray(configuration)) return;
-        const titleNeedsChange = configuration.some(section => section?.title === 'Участники сделки');
-        if (!titleNeedsChange) return;
-        const data = configuration.map(section => section.title === 'Участники сделки'
-          ? { ...section, title: 'Контакт заказчика' }
-          : section);
-        await call('crm.deal.details.configuration.set', { scope: 'C', extras, data });
-        sessionStorage.setItem(versionKey, '1');
+        // В карточке может быть личная конфигурация менеджера, которая перекрывает общую.
+        // Сначала меняем её, а если её нет — общую конфигурацию воронки.
+        for (const scope of ['P', 'C']) {
+          const configuration = await call('crm.deal.details.configuration.get', { scope, extras });
+          if (!Array.isArray(configuration)) continue;
+          const titleNeedsChange = configuration.some(section => section?.title === 'Участники сделки');
+          if (!titleNeedsChange) continue;
+          const data = configuration.map(section => section.title === 'Участники сделки'
+            ? { ...section, title: 'Контакт заказчика' }
+            : section);
+          await call('crm.deal.details.configuration.set', { scope, extras, data });
+          sessionStorage.setItem(versionKey, '1');
+          return;
+        }
       }
 
       function openDialog(roleKey) {
