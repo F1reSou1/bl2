@@ -6084,36 +6084,71 @@
       return best;
     }
 
-    const SITE_PRICE_TEXT = {
-      hourly: 'Почасовой уход: 2 часа — 1 200 ₽, 3 часа — 1 500 ₽, 4 часа — 1 800 ₽, 5 часов — 2 000 ₽, 6 часов — 2 200 ₽, 7 часов — 2 500 ₽, 8 часов — 2 700 ₽, 9 часов — 2 800 ₽, 10 часов — 3 000 ₽, 11 часов — 3 200 ₽, 12 часов — 3 500 ₽.',
-      homeDay: 'Сутки на дому — 3 800 ₽ за 24 часа.',
-      night: 'Ночь на дому — 3 500 ₽ за 12 часов.',
-      patronage: 'Патронаж 2 раза в день — 1 600 ₽ за день.',
-      oneTime: 'Разовый выход применяется автоматически для 1 выхода / смены / суток: +50% к базовой цене.',
-      hospital: 'В стационаре: дневная смена — 3 600 ₽, ночная смена — 4 100 ₽, сутки — 4 500 ₽.',
-      longTerm: 'Длительный уход на дому от 16 суток — 2 800 ₽ за сутки.',
-      urgent: 'Срочный подбор — +1 000 ₽ разово.',
-      pet: 'Уход за животным без выгула — +100 ₽ в день.',
-      experienced: 'Опытная сиделка / медсестра — +25%.',
-      twoPeople: 'Два подопечных — +50%.',
-      complex: 'Усложняющие факторы — до +20% по усмотрению менеджера.',
-      weekend: 'Воскресенье или суббота + воскресенье — +20%.',
-      holiday: 'Праздничные дни: Рождество, 23 февраля, 1/9 мая, 12 июня, 4 ноября — +30%; 1 января или 8 марта — +100%.'
-    };
+    // Чат и калькулятор используют один загруженный с сервера каталог Bitrix24.
+    // Если каталог недоступен, чат не придумывает цену: предлагает оставить
+    // контакт для расчёта менеджером.
+    function chatCatalogUnavailable() {
+      return 'Актуальные цены временно не загружены. Оставьте телефон — менеджер уточнит стоимость и график.';
+    }
 
-    const SITE_HOURLY_PRICES = {
-      2: '1 200 ₽',
-      3: '1 500 ₽',
-      4: '1 800 ₽',
-      5: '2 000 ₽',
-      6: '2 200 ₽',
-      7: '2 500 ₽',
-      8: '2 700 ₽',
-      9: '2 800 ₽',
-      10: '3 000 ₽',
-      11: '3 200 ₽',
-      12: '3 500 ₽'
-    };
+    function chatCatalogItemText(key, suffix) {
+      const product = catalogItem(key);
+      if (!product) return chatCatalogUnavailable();
+      return product.name + ' — ' + formatRub(product.price) + (suffix || '');
+    }
+
+    function chatHourlyPrice(hours) {
+      const product = catalogItem('hourly_' + Number(hours));
+      return product ? formatRub(product.price) : '';
+    }
+
+    function chatHourlySummary(hours) {
+      const values = (hours || [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12])
+        .map(function(hour) {
+          const price = chatHourlyPrice(hour);
+          if (!price) return '';
+          const word = hour === 1 ? 'час' : (hour >= 2 && hour <= 4 ? 'часа' : 'часов');
+          return hour + ' ' + word + ' — ' + price;
+        })
+        .filter(Boolean);
+      return values.length ? values.join(', ') : chatCatalogUnavailable();
+    }
+
+    function chatMinimumHourlyText() {
+      const value = formatHourlyPriceByCount(2);
+      return value ? 'Минимальный заказ — ' + value + '.' : chatCatalogUnavailable();
+    }
+
+    function chatDaytimeText() {
+      const values = chatHourlySummary([8, 12]);
+      return values === chatCatalogUnavailable() ? values : 'Дневной уход: ' + values + '.';
+    }
+
+    function chatPriceText(type) {
+      if (!calculatorCatalog) return chatCatalogUnavailable();
+      const item = function(key, suffix) { return chatCatalogItemText(key, suffix); };
+      switch (type) {
+        case 'hourly': return 'Почасовой уход: ' + chatHourlySummary() + '.';
+        case 'homeDay': return item('day_home', ' за 24 часа.');
+        case 'night': return item('night_home', ' за 12 часов.');
+        case 'patronage': return item('patronage', ' за день.');
+        case 'oneTime': return item('surcharge_one_time', ' к базовой цене; применяется автоматически для одного выхода / смены / суток.');
+        case 'hospital': return 'В стационаре: ' + [item('hospital_day'), item('hospital_night'), item('hospital_24')].join(', ') + '.';
+        case 'longTerm': return item('live_in', ' за сутки при сроке от 16 суток.');
+        case 'urgent': return item('surcharge_urgent', ' разово.');
+        case 'pet': return item('surcharge_pet', ' за день / выход.');
+        case 'experienced': return item('surcharge_experienced', ' к базовой цене.');
+        case 'twoPeople': return item('surcharge_two_people', ' к базовой цене.');
+        case 'complex': return item('surcharge_complex', ' к базовой цене.');
+        case 'weekend': return item('surcharge_weekend', ' к базовой цене.');
+        case 'holiday': return [item('surcharge_holiday_30', ' к базовой цене.'), item('surcharge_holiday_100', ' к базовой цене.')].join(' ');
+        default: return chatCatalogUnavailable();
+      }
+    }
+
+    const SITE_PRICE_TEXT = new Proxy({}, {
+      get: function(_target, key) { return chatPriceText(key); }
+    });
 
     function parseClockMinutes(hourText, minuteText) {
       const hour = Number(hourText);
@@ -6187,9 +6222,10 @@
     }
 
     function formatHourlyPriceByCount(hours) {
-      if (!hours || !SITE_HOURLY_PRICES[hours]) return null;
+      const price = chatHourlyPrice(hours);
+      if (!hours || !price) return null;
       const hourWord = hours === 1 ? 'час' : (hours >= 2 && hours <= 4 ? 'часа' : 'часов');
-      return hours + ' ' + hourWord + ' — ' + SITE_HOURLY_PRICES[hours];
+      return hours + ' ' + hourWord + ' — ' + price;
     }
 
     function formatDaysDuration(days) {
@@ -6343,11 +6379,11 @@
     function getBudgetPreferenceReply(value) {
       const ctx = chatState.context || {};
       let answer = 'Понял. Можно подобрать обычную сиделку без дополнительных требований и необязательных надбавок.';
-      if (ctx.schedule === 'daily') answer += ' Сутки на дому — 3 800 ₽ за 24 часа.';
-      else if (ctx.schedule === 'night') answer += ' Ночь на дому — 3 500 ₽ за 12 часов.';
-      else if (ctx.schedule === 'day') answer += ' Дневной уход: 8 часов — 2 700 ₽, 12 часов — 3 500 ₽.';
-      else if (ctx.schedule === 'hourly') answer += ' Почасовой уход начинается с 2 часов — 1 200 ₽.';
-      else if (ctx.schedule === 'live_in') answer += ' С проживанием от 16 суток — 2 800 ₽ за сутки.';
+      if (ctx.schedule === 'daily') answer += ' ' + SITE_PRICE_TEXT.homeDay;
+      else if (ctx.schedule === 'night') answer += ' ' + SITE_PRICE_TEXT.night;
+      else if (ctx.schedule === 'day') answer += ' ' + chatDaytimeText();
+      else if (ctx.schedule === 'hourly') answer += ' ' + chatMinimumHourlyText();
+      else if (ctx.schedule === 'live_in') answer += ' ' + SITE_PRICE_TEXT.longTerm;
       else if (ctx.schedule === 'continuous') answer += ' Для ухода 24/7 сиделки работают посменно, стоимость рассчитывает менеджер.';
       else answer += ' Без графика и состояния подопечного я не смогу честно определить подходящий вариант.';
 
@@ -6613,7 +6649,8 @@
         if ((hourRequest.type === 'fraction' || hourRequest.type === 'minutes' || hourRequest.type === 'exact') && hourRequest.hours < 2) {
           setChatMode(CHAT_MODES.COLLECTING_CLIENT, 'client', 'below_minimum_hours');
           chatState.context.shiftDuration = hourRequest.label;
-          return 'Минимальный заказ — 2 часа. Для запроса на ' + hourRequest.label + ' можно оформить минимальные 2 часа за 1 200 ₽ либо уточнить у менеджера формат ознакомительной встречи.';
+          const minimumHourly = formatHourlyPriceByCount(2);
+          return 'Минимальный заказ — 2 часа. Для запроса на ' + hourRequest.label + ' можно оформить ' + (minimumHourly ? minimumHourly : 'минимальные 2 часа; актуальную цену уточнит менеджер') + ' либо уточнить у менеджера формат ознакомительной встречи.';
         }
         if (hourRequest.type === 'fraction' && hourRequest.hours > 2 && !Number.isInteger(hourRequest.hours)) {
           setChatMode(CHAT_MODES.COLLECTING_CLIENT, 'client', 'fractional_hours');
@@ -6629,7 +6666,7 @@
           setChatMode(CHAT_MODES.COLLECTING_CLIENT, 'client', 'hour_range');
           chatState.context.shiftDuration = hourRequest.label;
           chatState.context.duration = hourRequest.label;
-          return 'Понял диапазон ' + hourRequest.label + '. В калькуляторе 2 часа стоят 1 200 ₽, 3 часа — 1 500 ₽. Точный вариант зависит от фактической длительности смены.';
+          return 'Понял диапазон ' + hourRequest.label + '. В калькуляторе: ' + chatHourlySummary([2, 3]) + '. Точный вариант зависит от фактической длительности смены.';
         }
         if (hourRequest.type === 'interval') {
           setChatMode(CHAT_MODES.COLLECTING_CLIENT, 'client', 'time_interval');
@@ -6638,7 +6675,7 @@
           chatState.context.shiftDuration = roundedHours + shiftWord;
           chatState.context.schedule = hourRequest.isNight ? 'night' : 'hourly';
           if (hourRequest.isNight && roundedHours === 12) {
-            return 'Интервал ' + hourRequest.label + ' — это ночная смена продолжительностью 12 часов. Ночь на дому стоит 3 500 ₽. Точный выход подтвердит менеджер.';
+            return 'Интервал ' + hourRequest.label + ' — это ночная смена продолжительностью 12 часов. ' + SITE_PRICE_TEXT.night + ' Точный выход подтвердит менеджер.';
           }
           const exact = formatHourlyPriceByCount(roundedHours);
           return 'Интервал ' + hourRequest.label + ' составляет ' + roundedHours + ' часа. ' + (exact ? exact + '.' : 'Стоимость рассчитает менеджер.') + ' Уточните дату начала.';
@@ -6707,10 +6744,7 @@
       if (hasPetMention(value) && !isPetNegated(value)) details.push(SITE_PRICE_TEXT.pet);
 
       if (generic || !details.length) {
-        details.push(
-          '2 часа — 1 200 ₽, 3 часа — 1 500 ₽, 4 часа — 1 800 ₽, 8 часов — 2 700 ₽, 12 часов или ночь на дому — 3 500 ₽, сутки на дому — 3 800 ₽.',
-          'В стационаре: день — 3 600 ₽, ночь — 4 100 ₽, сутки — 4 500 ₽. С проживанием от 16 суток — 2 800 ₽ за сутки.'
-        );
+        details.push(SITE_PRICE_TEXT.hourly, SITE_PRICE_TEXT.night, SITE_PRICE_TEXT.homeDay, SITE_PRICE_TEXT.hospital, SITE_PRICE_TEXT.longTerm);
       }
 
       let answer = Array.from(new Set(details)).join(' ');
@@ -6741,15 +6775,15 @@
       }
       if (ctx.schedule === 'night' || /ноч|ночью|ночн/.test(explicitValue)) parts.push(SITE_PRICE_TEXT.night);
       if (ctx.schedule === 'daily' || /сутк|суточ|24\s*час/.test(explicitValue)) parts.push(SITE_PRICE_TEXT.homeDay);
-      if (ctx.schedule === 'day' || /день|дневн|утра\s+до\s+вечера|выходн|суббот|воскрес/.test(explicitValue)) parts.push('Дневной уход: 8 часов — 2 700 ₽, 12 часов — 3 500 ₽.');
+      if (ctx.schedule === 'day' || /день|дневн|утра\s+до\s+вечера|выходн|суббот|воскрес/.test(explicitValue)) parts.push(chatDaytimeText());
       if (ctx.schedule === 'continuous' || /круглосуточ/.test(explicitValue)) parts.push('При уходе 24/7 сиделки работают посменно. Стоимость рассчитывает менеджер по сроку, адресу и состоянию подопечного.');
       if (ctx.schedule === 'live_in' || /прожив|16\s*сут|длительн/.test(explicitValue)) parts.push(SITE_PRICE_TEXT.longTerm);
 
       if (!parts.length) return getPriceReply(value || 'стоимость');
 
       let answer = Array.from(new Set(parts)).join(' ');
-      if (ctx.urgency) answer += ' Срочный подбор — +1 000 ₽ разово.';
-      if (ctx.weekend && ctx.weekendDay !== 'saturday') answer += ' Для воскресенья или полного графика суббота + воскресенье может применяться надбавка +20%.';
+      if (ctx.urgency) answer += ' ' + SITE_PRICE_TEXT.urgent;
+      if (ctx.weekend && ctx.weekendDay !== 'saturday') answer += ' ' + SITE_PRICE_TEXT.weekend;
       answer += ' Для точного расчёта менеджеру нужны адрес и окончательный список задач.';
       return answer;
     }
@@ -6845,7 +6879,7 @@
       mergeChatContext(extractClientSlots(value));
       if (/не\s+в\s+больниц.*(?:домой|на\s+дом)|(?:домой|на\s+дом).*не\s+в\s+больниц/.test(value)) chatState.context.place = 'home';
       setChatMode(CHAT_MODES.COLLECTING_CLIENT, 'client', 'home_visit');
-      return 'Да, выезд на дом есть. Основной формат центра — уход на дому у подопечного: почасово, на день, на ночь, на сутки или с проживанием. Также возможен уход в стационаре.\n\nНочь на дому — 3 500 ₽ за 12 часов, сутки на дому — 3 800 ₽ за 24 часа, почасовой уход начинается с 2 часов — 1 200 ₽.\n\nПодскажите, какой нужен формат: несколько часов, ночь, сутки или проживание?';
+      return 'Да, выезд на дом есть. Основной формат центра — уход на дому у подопечного: почасово, на день, на ночь, на сутки или с проживанием. Также возможен уход в стационаре.\n\n' + SITE_PRICE_TEXT.night + ' ' + SITE_PRICE_TEXT.homeDay + ' ' + chatMinimumHourlyText() + '\n\nПодскажите, какой нужен формат: несколько часов, ночь, сутки или проживание?';
     }
 
     function getSafetyReply(value) {
@@ -6932,11 +6966,11 @@
       if (schedule) {
         const priceAsked = isPriceIntent(value);
         if (/(выходн|суббот|воскрес)/.test(value)) parts.push('На выходные оформить можно, график согласовывается заранее.');
-        if (/(пару\s+час|несколько\s+час|2\s*час|3\s*час)/.test(value)) parts.push('Да, почасовой уход оформить можно. Минимальный вариант в калькуляторе сайта — 2 часа за 1 200 ₽.');
+        if (/(пару\s+час|несколько\s+час|2\s*час|3\s*час)/.test(value)) parts.push('Да, почасовой уход оформить можно. ' + chatMinimumHourlyText());
         if (/(утра\s+до\s+вечера|дневн)/.test(value)) parts.push('Дневная смена обычно 8–12 часов.');
         if (/(две\s+недел|2\s+недел|праздник)/.test(value)) parts.push('Краткосрочный уход возможен: от одного дня до нескольких месяцев.');
         if (/не\s+сроч/.test(value)) parts.push('Понял, срочный подбор не нужен. Можно запланировать начало ухода через неделю без надбавки за срочность.');
-        else if (/(сроч|сегодня|завтра|вечером)/.test(value)) parts.push('Срочный подбор возможен при наличии свободной сиделки. Надбавка за срочный подбор: +1 000 ₽ разово.');
+        else if (/(сроч|сегодня|завтра|вечером)/.test(value)) parts.push('Срочный подбор возможен при наличии свободной сиделки. ' + SITE_PRICE_TEXT.urgent);
         if (/(24\s*\/\s*7|круглосуточ)/.test(value)) parts.push('Для 24/7 ухода обычно нужна посменная организация, а не один человек без отдыха. Это должен рассчитать менеджер.');
         if (!priceAsked && /(сутк|24\s*час)/.test(value)) parts.push(SITE_PRICE_TEXT.homeDay);
         if (!priceAsked && /(ноч)/.test(value)) parts.push(SITE_PRICE_TEXT.night);
@@ -7130,15 +7164,15 @@
       const parts = [];
 
       if (schedule === 'night') {
-        parts.push('Вы выбрали ночной уход. Ночь на дому — 3 500 ₽ за 12 часов.');
+        parts.push('Вы выбрали ночной уход. ' + SITE_PRICE_TEXT.night);
       } else if (schedule === 'daily') {
-        parts.push('Вы выбрали суточный уход. Сутки на дому — 3 800 ₽ за 24 часа.');
+        parts.push('Вы выбрали суточный уход. ' + SITE_PRICE_TEXT.homeDay);
       } else if (schedule === 'day') {
-        parts.push('Вы выбрали дневной уход. По калькулятору: 8 часов — 2 700 ₽, 12 часов — 3 500 ₽.');
+        parts.push('Вы выбрали дневной уход. ' + chatDaytimeText());
       } else if (schedule === 'hourly') {
-        parts.push('Вы выбрали почасовой уход. Минимальный заказ — 2 часа за 1 200 ₽.');
+        parts.push('Вы выбрали почасовой уход. ' + chatMinimumHourlyText());
       } else if (schedule === 'live_in') {
-        parts.push('Вы выбрали уход с проживанием. При сроке от 16 суток стоимость начинается от 2 800 ₽ за сутки.');
+        parts.push('Вы выбрали уход с проживанием. ' + SITE_PRICE_TEXT.longTerm);
       }
 
       if (ctx.duration && !/час/.test(ctx.duration)) {
@@ -7542,7 +7576,7 @@
       if (scheduleWasMentioned || isExplicitPriceQuestion(lower)) {
         if (ctx.schedule === 'night') parts.push(SITE_PRICE_TEXT.night);
         else if (ctx.schedule === 'daily') parts.push(SITE_PRICE_TEXT.homeDay);
-        else if (ctx.schedule === 'day') parts.push('Дневной уход: 8 часов — 2 700 ₽, 12 часов — 3 500 ₽.');
+        else if (ctx.schedule === 'day') parts.push(chatDaytimeText());
         else if (ctx.schedule === 'hourly') {
           const requestedHours = getHourCountFromText(ctx.shiftDuration || ctx.duration || lower);
           const exactHourly = formatHourlyPriceByCount(requestedHours);
@@ -7550,7 +7584,7 @@
             if (requestedHours && requestedHours > 12) {
               parts.push('Для ' + requestedHours + ' часов нет фиксированного тарифа в калькуляторе; такой график рассчитает менеджер.');
             } else {
-              parts.push(exactHourly ? exactHourly + '.' : 'Минимальный почасовой заказ — 2 часа за 1 200 ₽.');
+              parts.push(exactHourly ? exactHourly + '.' : chatMinimumHourlyText());
             }
           }
         } else if (ctx.schedule === 'continuous') {
@@ -7562,7 +7596,7 @@
         }
       }
 
-      if (ctx.urgency && slots.urgency) parts.push('Срочный подбор — +1 000 ₽ разово.');
+      if (ctx.urgency && slots.urgency) parts.push(SITE_PRICE_TEXT.urgent);
 
       const missing = [];
       if (!ctx.schedule) missing.push('какой график нужен: несколько часов, день, ночь, сутки или проживание');
