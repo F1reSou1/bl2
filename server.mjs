@@ -1,4 +1,4 @@
-import { createReadStream, existsSync, promises as fs } from 'node:fs';
+import { createReadStream, existsSync, promises as fs, readFileSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { createServer } from 'node:http';
 import { dirname, extname, join, normalize, resolve } from 'node:path';
@@ -6,10 +6,24 @@ import { fileURLToPath } from 'node:url';
 
 const siteRoot = resolve(fileURLToPath(new URL('.', import.meta.url)));
 const port = Number(process.env.PORT || 80);
+// Dokploy создаёт .env во время сборки. У уже работающего Docker-сервиса
+// может остаться одноимённая устаревшая системная переменная, поэтому для
+// каталога сознательно читаем значение из этого файла раньше process.env.
+function envFileValue(name) {
+  try {
+    const prefix = `${name}=`;
+    const line = readFileSync(join(siteRoot, '.env'), 'utf8')
+      .split(/\r?\n/)
+      .find(item => item.startsWith(prefix));
+    return line ? line.slice(prefix.length).trim() : '';
+  } catch {
+    return '';
+  }
+}
 // В Dokploy старое имя переменной может оставаться в уже созданном сервисе.
 // Отдельная переменная для каталога позволяет обновлять эту интеграцию без
 // затрагивания других подключений Bitrix (например, Открытой линии).
-const bitrixWebhookUrl = (process.env.BITRIX_CATALOG_WEBHOOK_URL || process.env.BITRIX_WEBHOOK_URL || '').replace(/\/$/, '');
+const bitrixWebhookUrl = (envFileValue('BITRIX_CATALOG_WEBHOOK_URL') || process.env.BITRIX_CATALOG_WEBHOOK_URL || process.env.BITRIX_WEBHOOK_URL || '').replace(/\/$/, '');
 const categories = {
   client: process.env.BITRIX_CLIENT_CATEGORY_ID || '',
   recruitment: process.env.BITRIX_RECRUITMENT_CATEGORY_ID || ''
