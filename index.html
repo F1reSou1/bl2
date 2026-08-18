@@ -3749,29 +3749,19 @@
 
   <script>
   const CARE_PRICES = {
-    patronage: { label: 'Патронаж 2 раза в день', price: 1600, unit: 'день', durationHours: 0, minQty: 1, maxQty: 30, qtyLabel: 'Количество дней патронажа', qtyWord: 'день/дней', incoming: true },
-    one_time: { label: 'Разовый выход', price: 1500, unit: 'выход', durationHours: 1, minQty: 1, maxQty: 1, qtyLabel: 'Количество разовых выходов', qtyWord: 'разовый выход', incoming: true, autoOneTime: true },
-    night_home: { label: 'Ночь на дому, 12 часов', price: 3500, unit: 'ночь', durationHours: 12, minQty: 1, maxQty: 30, qtyLabel: 'Количество ночей', qtyWord: 'ночь/ночей', incoming: true },
-    day_home: { label: 'Сутки на дому', price: 3800, unit: 'сутки', durationHours: 24, minQty: 1, maxQty: 30, qtyLabel: 'Количество суток', qtyWord: 'сутки', incoming: true },
-    hospital_day: { label: 'День в стационаре', price: 3600, unit: 'смена', durationHours: 12, minQty: 1, maxQty: 30, qtyLabel: 'Количество дневных смен', qtyWord: 'смена/смен', incoming: true },
-    hospital_night: { label: 'Ночь в стационаре', price: 4100, unit: 'смена', durationHours: 12, minQty: 1, maxQty: 30, qtyLabel: 'Количество ночных смен', qtyWord: 'смена/смен', incoming: true },
-    hospital_24: { label: 'Сутки в стационаре', price: 4500, unit: 'сутки', durationHours: 24, minQty: 1, maxQty: 30, qtyLabel: 'Количество суток', qtyWord: 'сутки', incoming: true },
-    live_in: { label: 'С проживанием', price: 2800, unit: 'сутки', durationHours: 24, minQty: 16, maxQty: 30, qtyLabel: 'Количество суток проживания', qtyWord: 'сутки проживания', incoming: false }
+    patronage: { key: 'patronage', unit: 'день', durationHours: 0, minQty: 1, maxQty: 30, qtyLabel: 'Количество дней патронажа', qtyWord: 'день/дней', incoming: true },
+    one_time: { key: 'one_time', unit: 'выход', durationHours: 1, minQty: 1, maxQty: 1, qtyLabel: 'Количество разовых выходов', qtyWord: 'разовый выход', incoming: true, autoOneTime: true },
+    night_home: { key: 'night_home', unit: 'ночь', durationHours: 12, minQty: 1, maxQty: 30, qtyLabel: 'Количество ночей', qtyWord: 'ночь/ночей', incoming: true },
+    day_home: { key: 'day_home', unit: 'сутки', durationHours: 24, minQty: 1, maxQty: 30, qtyLabel: 'Количество суток', qtyWord: 'сутки', incoming: true },
+    hospital_day: { key: 'hospital_day', unit: 'смена', durationHours: 12, minQty: 1, maxQty: 30, qtyLabel: 'Количество дневных смен', qtyWord: 'смена/смен', incoming: true },
+    hospital_night: { key: 'hospital_night', unit: 'смена', durationHours: 12, minQty: 1, maxQty: 30, qtyLabel: 'Количество ночных смен', qtyWord: 'смена/смен', incoming: true },
+    hospital_24: { key: 'hospital_24', unit: 'сутки', durationHours: 24, minQty: 1, maxQty: 30, qtyLabel: 'Количество суток', qtyWord: 'сутки', incoming: true },
+    live_in: { key: 'live_in', unit: 'сутки', durationHours: 24, minQty: 16, maxQty: 30, qtyLabel: 'Количество суток проживания', qtyWord: 'сутки проживания', incoming: false }
   };
 
-  const HOURLY_PRICES = {
-    2: 1200,
-    3: 1500,
-    4: 1800,
-    5: 2000,
-    6: 2200,
-    7: 2500,
-    8: 2700,
-    9: 2800,
-    10: 3000,
-    11: 3200,
-    12: 3500
-  };
+  const HOURLY_PRICES = {};
+  let calculatorCatalog = null;
+  let calculatorCatalogError = '';
 
   let lastCarePlan = null;
 
@@ -3781,6 +3771,108 @@
 
   function roundToTen(value) {
     return Math.round(value / 10) * 10;
+  }
+
+  function roundMoney(value) {
+    return Math.round(Number(value || 0) * 100) / 100;
+  }
+
+  function catalogItem(key) {
+    return calculatorCatalog?.items?.[key] || null;
+  }
+
+  function catalogPrice(key) {
+    return Number(catalogItem(key)?.price || 0);
+  }
+
+  function catalogPercent(key) {
+    return Number(catalogItem(key)?.percent || 0);
+  }
+
+  function updatePlanCard(plan, key, priceSuffix) {
+    const product = catalogItem(key);
+    const input = document.querySelector('input[name="carePlan"][value="' + plan + '"]');
+    const card = input?.closest('label');
+    if (!product || !card) return;
+    const title = card.querySelector('span.font-semibold');
+    const description = card.querySelector('p');
+    if (title) title.textContent = product.name;
+    if (description) description.textContent = (priceSuffix || '') + formatRub(product.price) + ' за ' + (CARE_PRICES[plan]?.unit || 'выход');
+  }
+
+  function updateSurchargeText(inputId, key, suffix) {
+    const product = catalogItem(key);
+    const label = document.getElementById(inputId)?.closest('label');
+    if (!product || !label) return;
+    const title = label.querySelector('strong');
+    const description = label.querySelector('.text-gray-500');
+    if (title) title.textContent = product.name;
+    if (description) description.textContent = suffix || (product.percent ? '+' + product.percent + '% к базовой цене' : formatRub(product.price));
+  }
+
+  function applyCalculatorCatalog(catalog) {
+    calculatorCatalog = catalog;
+    for (let hours = 2; hours <= 12; hours++) HOURLY_PRICES[hours] = catalogPrice('hourly_' + hours);
+    Object.keys(CARE_PRICES).forEach(function(plan) {
+      const meta = CARE_PRICES[plan];
+      const product = catalogItem(meta.key);
+      if (product) {
+        meta.label = product.name;
+        meta.price = product.price;
+      }
+    });
+
+    const hourlySelect = document.getElementById('careHours');
+    if (hourlySelect) {
+      const selected = hourlySelect.value || '2';
+      hourlySelect.innerHTML = '';
+      for (let hours = 2; hours <= 12; hours++) {
+        const product = catalogItem('hourly_' + hours);
+        if (!product) continue;
+        const option = document.createElement('option');
+        option.value = String(hours);
+        option.textContent = product.name + ' — ' + formatRub(product.price);
+        option.selected = option.value === selected;
+        hourlySelect.appendChild(option);
+      }
+    }
+    updatePlanCard('patronage', 'patronage', '');
+    updatePlanCard('one_time', 'one_time', '');
+    updatePlanCard('night_home', 'night_home', '');
+    updatePlanCard('day_home', 'day_home', '');
+    updatePlanCard('hospital_day', 'hospital_day', '');
+    updatePlanCard('hospital_night', 'hospital_night', '');
+    updatePlanCard('hospital_24', 'hospital_24', '');
+    updatePlanCard('live_in', 'live_in', 'От 16 суток — ');
+    updateSurchargeText('surchargeOneTime', 'surcharge_one_time');
+    updateSurchargeText('surchargeUrgent', 'surcharge_urgent', '+' + formatRub(catalogPrice('surcharge_urgent')) + ' разово');
+    updateSurchargeText('surchargeExperienced', 'surcharge_experienced');
+    updateSurchargeText('surchargeTwoPeople', 'surcharge_two_people');
+    updateSurchargeText('surchargePet', 'surcharge_pet', '+' + formatRub(catalogPrice('surcharge_pet')) + ' за день / выход');
+    updateSurchargeText('surchargeComplex', 'surcharge_complex');
+    const weekend = document.getElementById('weekendMode');
+    if (weekend) {
+      weekend.options[1].textContent = catalogItem('surcharge_weekend')?.name || weekend.options[1].textContent;
+      weekend.options[2].textContent = catalogItem('surcharge_weekend')?.name || weekend.options[2].textContent;
+    }
+    const holiday = document.getElementById('holidayMode');
+    if (holiday) {
+      holiday.options[1].textContent = catalogItem('surcharge_holiday_30')?.name || holiday.options[1].textContent;
+      holiday.options[2].textContent = catalogItem('surcharge_holiday_100')?.name || holiday.options[2].textContent;
+    }
+  }
+
+  async function loadCalculatorCatalog() {
+    try {
+      const response = await fetch('/api/calculator/catalog', { cache: 'no-store' });
+      const data = await response.json();
+      if (!response.ok || !data?.catalog?.items) throw new Error(data?.error || 'Каталог не получен');
+      applyCalculatorCatalog(data.catalog);
+      calculatorCatalogError = '';
+    } catch (error) {
+      calculatorCatalogError = 'Не удалось загрузить актуальные цены. Попробуйте обновить страницу.';
+      console.error('Calculator catalog load failed:', error);
+    }
   }
 
   function checked(id) {
@@ -3801,7 +3893,9 @@
 
   function getPlanMeta(plan) {
     if (plan === 'hourly') {
-      return { label: 'Дневная почасовая', price: HOURLY_PRICES[Number(document.getElementById('careHours')?.value || 2)] || 1200, unit: 'выход', durationHours: Number(document.getElementById('careHours')?.value || 2), minQty: 1, maxQty: 30, qtyLabel: 'Количество выходов', qtyWord: 'выход(ов)', incoming: true };
+      const hours = Number(document.getElementById('careHours')?.value || 2);
+      const product = catalogItem('hourly_' + hours);
+      return { key: 'hourly_' + hours, label: product?.name || 'Дневная почасовая', price: HOURLY_PRICES[hours] || 0, unit: 'выход', durationHours: hours, minQty: 1, maxQty: 30, qtyLabel: 'Количество выходов', qtyWord: 'выход(ов)', incoming: true };
     }
     return CARE_PRICES[plan] || CARE_PRICES.hourly;
   }
@@ -3892,74 +3986,88 @@
     const quantity = Number(document.getElementById('careQuantity')?.value || 1);
     const meta = getPlanMeta(plan);
     updateAutoSurcharges(plan, quantity, meta);
-    const baseLabel = plan === 'hourly' ? 'Дневная почасовая, ' + hours + ' ч.' : meta.label;
-    const basePrice = plan === 'hourly' ? HOURLY_PRICES[hours] : meta.price;
+    const baseLabel = meta.label;
+    const basePrice = meta.price;
     const unit = meta.unit;
-
-    let percent = 0;
-    let fixedPerShift = 0;
-    let fixedOnce = 0;
+    const productRows = [];
     const breakdown = [];
 
+    function addRow(key, rowQuantity) {
+      const product = catalogItem(key);
+      if (!product) return;
+      const percent = Number(product.percent || 0);
+      const price = percent ? roundMoney(basePrice * percent / 100) : Number(product.price || 0);
+      productRows.push({ key: key, name: product.name, price: price, quantity: rowQuantity, percent: percent });
+    }
+
+    const baseKey = plan === 'hourly' ? 'hourly_' + hours : meta.key;
+    const baseProduct = catalogItem(baseKey);
+    productRows.push({ key: baseKey, name: baseProduct?.name || baseLabel, price: basePrice, quantity: quantity, percent: 0 });
     breakdown.push('База: ' + baseLabel + ' — ' + formatRub(basePrice) + ' за ' + unit);
 
     const autoOneTime = shouldAutoOneTime(plan, quantity, meta);
     if (checked('surchargeOneTime')) {
-      percent += 50;
-      breakdown.push((autoOneTime ? 'Разовый выход применяется автоматически при выборе 1 выхода / смены / суток' : 'Разовый выход выбран вручную') + ': +50%');
+      addRow('surcharge_one_time', quantity);
+      breakdown.push((autoOneTime ? 'Применяется автоматически: ' : 'Выбрано: ') + (catalogItem('surcharge_one_time')?.name || 'Надбавка за единичный выход'));
     }
 
     if (meta.incoming && !autoOneTime && quantity < 5) {
-      percent += 20;
-      breakdown.push('Менее 5 выходов / смен / суток: +20%');
+      addRow('surcharge_less_than_five', quantity);
+      breakdown.push(catalogItem('surcharge_less_than_five')?.name || 'Надбавка за менее 5 выходов');
     }
 
-    const weekendPercent = Number(document.getElementById('weekendMode')?.value || 0);
-    if (weekendPercent && meta.incoming) {
-      percent += weekendPercent;
-      breakdown.push(getSelectedText('weekendMode'));
+    const weekendMode = document.getElementById('weekendMode')?.value || '0';
+    if (weekendMode !== '0' && meta.incoming) {
+      addRow('surcharge_weekend', quantity);
+      breakdown.push(catalogItem('surcharge_weekend')?.name || getSelectedText('weekendMode'));
     }
 
-    const holidayPercent = Number(document.getElementById('holidayMode')?.value || 0);
-    if (holidayPercent) {
-      percent += holidayPercent;
-      breakdown.push(getSelectedText('holidayMode'));
+    const holidayMode = document.getElementById('holidayMode')?.value || '0';
+    if (holidayMode === '30') {
+      addRow('surcharge_holiday_30', quantity);
+      breakdown.push(catalogItem('surcharge_holiday_30')?.name || getSelectedText('holidayMode'));
+    }
+    if (holidayMode === '100') {
+      addRow('surcharge_holiday_100', quantity);
+      breakdown.push(catalogItem('surcharge_holiday_100')?.name || getSelectedText('holidayMode'));
     }
 
     if (checked('surchargeExperienced')) {
-      percent += 25;
-      breakdown.push('Опытная сиделка / медсестра: +25%');
+      addRow('surcharge_experienced', quantity);
+      breakdown.push(catalogItem('surcharge_experienced')?.name || 'Опытная сиделка / медсестра');
     }
 
     if (checked('surchargeTwoPeople')) {
-      percent += 50;
-      breakdown.push('Два подопечных одновременно: +50%');
+      addRow('surcharge_two_people', quantity);
+      breakdown.push(catalogItem('surcharge_two_people')?.name || 'Два подопечных');
     }
 
     if (checked('surchargeComplex')) {
-      percent += 20;
-      breakdown.push('Усложняющие факторы: до +20%');
+      addRow('surcharge_complex', quantity);
+      breakdown.push(catalogItem('surcharge_complex')?.name || 'Усложняющие факторы');
     }
 
     if (checked('surchargePet')) {
-      fixedPerShift += 100;
-      breakdown.push('Уход за животным без выгула: +100 ₽ за день / выход');
+      addRow('surcharge_pet', quantity);
+      breakdown.push(catalogItem('surcharge_pet')?.name || 'Уход за животным без выгула');
     }
 
     if (checked('surchargeUrgent')) {
-      fixedOnce += 1000;
-      breakdown.push('Срочный подбор: +1 000 ₽ разово');
+      addRow('surcharge_urgent', 1);
+      breakdown.push(catalogItem('surcharge_urgent')?.name || 'Срочный подбор');
     }
 
-    const shiftPrice = roundToTen(basePrice * (1 + percent / 100) + fixedPerShift);
-    const periodPrice = shiftPrice * quantity + fixedOnce;
-    const monthQty = plan === 'live_in' ? 30 : 30;
-    const monthPrice = Math.round(shiftPrice * monthQty + fixedOnce);
+    const periodPrice = roundMoney(productRows.reduce(function(sum, row) { return sum + row.price * row.quantity; }, 0));
+    const fixedOnce = productRows.filter(function(row) { return row.key === 'surcharge_urgent'; }).reduce(function(sum, row) { return sum + row.price * row.quantity; }, 0);
+    const shiftPrice = roundMoney((periodPrice - fixedOnce) / quantity);
+    const monthPrice = roundMoney(shiftPrice * 30 + fixedOnce);
+    const percent = productRows.filter(function(row) { return row.percent; }).reduce(function(sum, row) { return sum + row.percent; }, 0);
+    const fixedPerShift = productRows.filter(function(row) { return row.key === 'surcharge_pet'; }).reduce(function(sum, row) { return sum + row.price; }, 0);
 
-    if (percent === 0 && fixedPerShift === 0 && fixedOnce === 0) {
+    if (productRows.length === 1) {
       breakdown.push('Надбавки не выбраны');
     } else {
-      breakdown.push('Итого надбавки: +' + percent + '%' + (fixedPerShift ? ' и +' + fixedPerShift + ' ₽ за выход / сутки' : '') + (fixedOnce ? ' + ' + fixedOnce + ' ₽ разово' : ''));
+      breakdown.push('Итог в сделке считается как сумма всех товарных позиций.');
     }
 
     if ((plan === 'hourly' && hours > 7) || meta.durationHours > 7) {
@@ -3990,6 +4098,13 @@
       periodPrice,
       monthPrice,
       breakdown,
+      productRows,
+      weekendMode: weekendMode,
+      holidayMode: holidayMode,
+      surcharges: {
+        oneTime: checked('surchargeOneTime'), urgent: checked('surchargeUrgent'), experienced: checked('surchargeExperienced'),
+        twoPeople: checked('surchargeTwoPeople'), complex: checked('surchargeComplex'), pet: checked('surchargePet')
+      },
       age: document.getElementById('ageRange')?.value || '',
       gender: selectedValue('gender', ''),
       bedridden: selectedValue('bedridden', ''),
@@ -3998,7 +4113,9 @@
   }
 
   function updateCareCalc() {
+    if (!calculatorCatalog) return;
     const data = getCareCalcData();
+    if (data.plan === 'hourly') updatePlanCard('hourly', 'hourly_' + data.hours, '');
     const quantityHintEl = document.getElementById('quantityHint');
     if (quantityHintEl && data.quantity === 1 && data.plan !== 'live_in') {
       if (data.plan === 'patronage') {
@@ -4044,8 +4161,7 @@
         data.qtyLabel + ': ' + data.quantity,
         'Цена за выход / смену / сутки: ' + formatRub(data.shiftPrice),
         'Цена за выбранный период: ' + formatRub(data.periodPrice),
-        'Цена при 30 выходах / сутках: ' + formatRub(data.monthPrice),
-        'Детализация: ' + data.breakdown.join('; '),
+        'Товары и надбавки: ' + data.productRows.map(function(row) { return row.name + ' — ' + row.quantity + ' × ' + formatRub(row.price); }).join('; '),
         getSelectedCareSituations().length ? 'Ситуации клиента: ' + getSelectedCareSituations().join('; ') : '',
         data.comment ? 'Комментарий: ' + data.comment : ''
       ].filter(Boolean).join('\n');
@@ -4114,6 +4230,10 @@
   }
 
   async function submitCareCalcRequest() {
+    if (!calculatorCatalog) {
+      showLeadStatus('calcLeadStatus', calculatorCatalogError || 'Загружаем актуальные цены из Bitrix24…');
+      return;
+    }
     const payload = buildCareLeadPayload();
     const privacy = document.getElementById('calcPrivacy')?.checked;
 
@@ -4143,8 +4263,7 @@
     }
   }
 
-  document.addEventListener('DOMContentLoaded', function() {
-    fillQuantityOptions(selectedValue('carePlan', 'hourly'), false);
+  document.addEventListener('DOMContentLoaded', async function() {
     document.querySelectorAll('#careSituations input[type="checkbox"]').forEach(function(input) {
       input.addEventListener('change', function() {
         renderSelectedCareSituations();
@@ -4152,7 +4271,13 @@
       });
     });
     renderSelectedCareSituations();
-    updateCareCalc();
+    await loadCalculatorCatalog();
+    if (calculatorCatalog) {
+      fillQuantityOptions(selectedValue('carePlan', 'hourly'), false);
+      updateCareCalc();
+    } else {
+      showLeadStatus('calcLeadStatus', calculatorCatalogError);
+    }
   });
   </script>
 

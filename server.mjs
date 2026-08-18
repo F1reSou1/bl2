@@ -14,10 +14,20 @@ const categories = {
 // Поле сделки «Рекомендация с сайта». Переменная окружения позволяет
 // переопределить код для другого портала, а этот код — текущий рабочий портал.
 const siteNoteField = (process.env.BITRIX_SITE_NOTE_FIELD || 'UF_CRM_1786668098223').trim();
-// Многострочное поле сделки «Расчёт из калькулятора». Старое поле с краткой
-// заметкой сохраняем на время проверки, чтобы менеджеры могли сравнить оба
-// варианта на тестовых заявках.
+// Многострочное поле сделки «Расчёт из калькулятора». Это снимок исходного
+// запроса посетителя: он остаётся менеджеру для сверки с товарами сделки.
 const calculatorDetailsField = (process.env.BITRIX_CALCULATOR_DETAILS_FIELD || 'UF_CRM_1787042892').trim();
+const calculatorCatalogId = Number(process.env.BITRIX_CALCULATOR_CATALOG_ID || 24);
+const calculatorProductIds = {
+  hourly_2: 20, hourly_3: 24, hourly_4: 28, hourly_5: 32, hourly_6: 36,
+  hourly_7: 40, hourly_8: 44, hourly_9: 48, hourly_10: 52, hourly_11: 56, hourly_12: 60,
+  patronage: 64, night_home: 72, day_home: 76, hospital_day: 80, hospital_night: 84,
+  hospital_24: 88, live_in: 92, surcharge_one_time: 96, surcharge_less_than_five: 100,
+  surcharge_urgent: 104, surcharge_experienced: 108, surcharge_two_people: 112,
+  surcharge_complex: 116, surcharge_pet: 120, surcharge_weekend: 124,
+  surcharge_holiday_30: 128, surcharge_holiday_100: 132, one_time: 136
+};
+let calculatorCatalogCache = { expiresAt: 0, value: null };
 // Настройки кастомного коннектора Открытой линии. Они намеренно находятся
 // только на сервере: токены Bitrix24 никогда не отдаются в браузер.
 const openLine = {
@@ -342,6 +352,123 @@ async function bitrixCall(method, payload) {
   return body.result;
 }
 
+function currencyNumber(value) {
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 ? Math.round(number * 100) / 100 : 0;
+}
+
+function percentageFromProductName(name) {
+  const match = cleanText(name, 300).match(/\+(\d+(?:[.,]\d+)?)\s*%/);
+  return match ? Number(match[1].replace(',', '.')) : 0;
+}
+
+async function getCalculatorCatalog(force = false) {
+  if (!force && calculatorCatalogCache.value && calculatorCatalogCache.expiresAt > Date.now()) {
+    return calculatorCatalogCache.value;
+  }
+
+  const products = await bitrixCall('crm.product.list', {
+    order: { ID: 'ASC' },
+    filter: { CATALOG_ID: calculatorCatalogId },
+    select: ['ID', 'NAME', 'PRICE', 'CURRENCY_ID']
+  });
+  const byId = new Map(indexedValues(products).map(product => [Number(product?.ID), product]));
+  const missing = Object.entries(calculatorProductIds)
+    .filter(([, id]) => !byId.has(id))
+    .map(([key]) => key);
+  if (missing.length) throw new Error(`В каталоге Bitrix24 не найдены позиции калькулятора: ${missing.join(', ')}`);
+
+  const items = Object.fromEntries(Object.entries(calculatorProductIds).map(([key, id]) => {
+    const product = byId.get(id);
+    return [key, {
+      id,
+      name: cleanText(product?.NAME, 300),
+      price: currencyNumber(product?.PRICE),
+      currency: cleanText(product?.CURRENCY_ID, 10) || 'RUB',
+      percent: percentageFromProductName(product?.NAME)
+    }];
+  }));
+  const catalog = { catalogId: calculatorCatalogId, fetchedAt: new Date().toISOString(), items };
+  calculatorCatalogCache = { value: catalog, expiresAt: Date.now() + 60_000 };
+  return catalog;
+}
+
+function calculatorBaseKey(calculation) {
+  const plan = cleanText(calculation?.plan, 50);
+  if (plan === 'hourly') {
+    const hours = Math.min(12, Math.max(2, Math.round(Number(calculation?.hours) || 2)));
+    return `hourly_${hours}`;
+  }
+  return ['patronage', 'one_time', 'night_home', 'day_home', 'hospital_day', 'hospital_night', 'hospital_24', 'live_in'].includes(plan)
+    ? plan
+    : 'hourly_2';
+}
+
+function calculatorQuantity(calculation, baseKey) {
+  const min = baseKey === 'live_in' ? 16 : 1;
+  const max = baseKey === 'one_time' ? 1 : 30;
+  return Math.min(max, Math.max(min, Math.round(Number(calculation?.quantity) || min)));
+}
+
+function requestedCheckbox(calculation, name) {
+  return Boolean(calculation?.surcharges && calculation.surcharges[name]);
+}
+
+function addPercentageRow(rows, catalog, key, quantity, basePrice) {
+  const product = catalog.items[key];
+  if (!product?.percent) throw new Error(`У товара «${product?.name || key}» не указана процентная надбавка в названии`);
+  rows.push({
+    PRODUCT_ID: product.id,
+    PRICE: currencyNumber(basePrice * product.percent / 100),
+    QUANTITY: quantity,
+    SORT: rows.length + 1
+  });
+}
+
+function buildCalculatorProductRows(calculation, catalog) {
+  const baseKey = calculatorBaseKey(calculation);
+  const base = catalog.items[baseKey];
+  if (!base || !base.price) throw new Error(`В Bitrix24 не задана цена услуги «${base?.name || baseKey}»`);
+  const quantity = calculatorQuantity(calculation, baseKey);
+  const incoming = baseKey !== 'live_in';
+  const autoOneTime = baseKey === 'one_time' || (incoming && quantity === 1);
+  const rows = [{ PRODUCT_ID: base.id, PRICE: base.price, QUANTITY: quantity, SORT: 1 }];
+
+  if (autoOneTime || requestedCheckbox(calculation, 'oneTime')) addPercentageRow(rows, catalog, 'surcharge_one_time', quantity, base.price);
+  if (incoming && !autoOneTime && quantity < 5) addPercentageRow(rows, catalog, 'surcharge_less_than_five', quantity, base.price);
+
+  const weekend = Number(calculation?.weekendMode) || 0;
+  if (incoming && weekend) addPercentageRow(rows, catalog, 'surcharge_weekend', quantity, base.price);
+  const holiday = Number(calculation?.holidayMode) || 0;
+  if (holiday === 30) addPercentageRow(rows, catalog, 'surcharge_holiday_30', quantity, base.price);
+  if (holiday === 100) addPercentageRow(rows, catalog, 'surcharge_holiday_100', quantity, base.price);
+  if (requestedCheckbox(calculation, 'experienced')) addPercentageRow(rows, catalog, 'surcharge_experienced', quantity, base.price);
+  if (requestedCheckbox(calculation, 'twoPeople')) addPercentageRow(rows, catalog, 'surcharge_two_people', quantity, base.price);
+  if (requestedCheckbox(calculation, 'complex')) addPercentageRow(rows, catalog, 'surcharge_complex', quantity, base.price);
+
+  if (requestedCheckbox(calculation, 'pet')) {
+    const product = catalog.items.surcharge_pet;
+    rows.push({ PRODUCT_ID: product.id, PRICE: product.price, QUANTITY: quantity, SORT: rows.length + 1 });
+  }
+  if (requestedCheckbox(calculation, 'urgent')) {
+    const product = catalog.items.surcharge_urgent;
+    rows.push({ PRODUCT_ID: product.id, PRICE: product.price, QUANTITY: 1, SORT: rows.length + 1 });
+  }
+  return rows;
+}
+
+function buildCalculatorSnapshotRows(calculation) {
+  const rows = Array.isArray(calculation?.productRows) ? calculation.productRows : [];
+  return rows
+    .map(row => {
+      const name = cleanText(row?.name, 300);
+      const quantity = numberOrZero(row?.quantity);
+      const price = currencyNumber(row?.price);
+      return name && quantity ? `• ${name}: ${quantity} × ${formatRubles(price)}` : '';
+    })
+    .filter(Boolean);
+}
+
 function buildSiteNote(lead) {
   const form = cleanText(lead.form, 100);
   const leadType = lead.leadType === 'recruitment' ? 'recruitment' : 'client';
@@ -349,14 +476,12 @@ function buildSiteNote(lead) {
 
   if (form === 'care_calculator' && lead.calculation && typeof lead.calculation === 'object') {
     const calculation = lead.calculation;
-    lines.push('Расчёт ухода с сайта');
+    lines.push('Запрос из калькулятора');
     if (cleanText(calculation.baseLabel, 200)) lines.push(`Услуга: ${cleanText(calculation.baseLabel, 200)}`);
     if (numberOrZero(calculation.quantity)) lines.push(`${cleanText(calculation.qtyLabel, 100) || 'Количество'}: ${numberOrZero(calculation.quantity)}`);
-    if (numberOrZero(calculation.shiftPrice)) lines.push(`Стоимость за выход / смену / сутки: ${numberOrZero(calculation.shiftPrice)} ₽`);
-    if (numberOrZero(calculation.periodPrice)) lines.push(`Стоимость по выбранному периоду: ${numberOrZero(calculation.periodPrice)} ₽`);
-    if (Array.isArray(calculation.breakdown) && calculation.breakdown.length) {
-      lines.push(`Условия расчёта: ${calculation.breakdown.map(item => cleanText(item, 300)).filter(Boolean).join('; ')}`);
-    }
+    if (cleanText(calculation.age, 50)) lines.push(`Возраст подопечного: ${cleanText(calculation.age, 50)}`);
+    if (cleanText(calculation.gender, 100)) lines.push(`Пол подопечного: ${cleanText(calculation.gender, 100)}`);
+    if (cleanText(calculation.bedridden, 200)) lines.push(`Состояние: ${cleanText(calculation.bedridden, 200)}`);
     if (Array.isArray(lead.selectedSituations) && lead.selectedSituations.length) {
       lines.push(`Ситуация: ${lead.selectedSituations.map(item => cleanText(item, 300)).filter(Boolean).join('; ')}`);
     }
@@ -384,28 +509,20 @@ function buildCalculatorDetails(lead) {
   if (lead?.form !== 'care_calculator' || !lead.calculation || typeof lead.calculation !== 'object') return '';
 
   const calculation = lead.calculation;
-  const blocks = ['РАСЧЁТ УХОДА С САЙТА'];
+  const blocks = ['ИСХОДНЫЙ ЗАПРОС ИЗ КАЛЬКУЛЯТОРА'];
   const request = [];
   if (cleanText(calculation.baseLabel, 200)) request.push(`Услуга: ${cleanText(calculation.baseLabel, 200)}`);
   if (numberOrZero(calculation.quantity)) request.push(`${cleanText(calculation.qtyLabel, 100) || 'Количество'}: ${numberOrZero(calculation.quantity)}`);
   if (request.length) blocks.push(request.join('\n'));
 
-  const prices = [];
-  if (numberOrZero(calculation.shiftPrice)) prices.push(`Стоимость за выход / смену / сутки: ${formatRubles(calculation.shiftPrice)}`);
-  if (numberOrZero(calculation.periodPrice)) prices.push(`Стоимость по выбранному периоду: ${formatRubles(calculation.periodPrice)}`);
-  if (numberOrZero(calculation.monthPrice)) prices.push(`Стоимость при 30 ${cleanText(calculation.qtyWord, 50) || 'выходах / сутках'}: ${formatRubles(calculation.monthPrice)}`);
-  if (prices.length) blocks.push(`СТОИМОСТЬ\n${prices.join('\n')}`);
+  const items = buildCalculatorSnapshotRows(calculation);
+  if (items.length) blocks.push(`ТОВАРЫ И НАДБАВКИ В ИСХОДНОМ ЗАПРОСЕ\n${items.join('\n')}`);
 
   const person = [];
   if (cleanText(calculation.age, 50)) person.push(`Возраст: ${cleanText(calculation.age, 50)}`);
   if (cleanText(calculation.gender, 100)) person.push(`Пол: ${cleanText(calculation.gender, 100)}`);
   if (cleanText(calculation.bedridden, 200)) person.push(`Состояние: ${cleanText(calculation.bedridden, 200)}`);
   if (person.length) blocks.push(`ДАННЫЕ ПОДОПЕЧНОГО\n${person.join('\n')}`);
-
-  const breakdown = Array.isArray(calculation.breakdown)
-    ? calculation.breakdown.map(item => cleanText(item, 300)).filter(Boolean)
-    : [];
-  if (breakdown.length) blocks.push(`УСЛОВИЯ И НАДБАВКИ\n${breakdown.map(item => `• ${item}`).join('\n')}`);
 
   const situations = Array.isArray(lead.selectedSituations)
     ? lead.selectedSituations.map(item => cleanText(item, 300)).filter(Boolean)
@@ -423,6 +540,21 @@ function numberOrZero(value) {
   return Number.isFinite(number) && number > 0 ? number : 0;
 }
 
+function enrichCalculatorSnapshot(calculation, catalog, productRows) {
+  const base = catalog.items[calculatorBaseKey(calculation)];
+  const quantity = calculatorQuantity(calculation, calculatorBaseKey(calculation));
+  return {
+    ...calculation,
+    baseLabel: base.name,
+    basePrice: base.price,
+    quantity,
+    productRows: productRows.map(row => {
+      const product = Object.values(catalog.items).find(item => item.id === Number(row.PRODUCT_ID));
+      return { name: product?.name || 'Товар из каталога', price: row.PRICE, quantity: row.QUANTITY };
+    })
+  };
+}
+
 async function createBitrixDeal(lead) {
   if (!bitrixWebhookUrl) throw new Error('Интеграция с Bitrix24 ещё не настроена на сервере');
   const leadType = lead.leadType === 'recruitment' ? 'recruitment' : 'client';
@@ -437,13 +569,23 @@ async function createBitrixDeal(lead) {
       PHONE: [{ VALUE: phone, VALUE_TYPE: 'WORK' }]
     }
   });
+  let calculation = lead?.calculation;
+  let productRows = null;
+  if (lead.form === 'care_calculator' && calculation && typeof calculation === 'object') {
+    const catalog = await getCalculatorCatalog(true);
+    productRows = buildCalculatorProductRows(calculation, catalog);
+    calculation = enrichCalculatorSnapshot(calculation, catalog, productRows);
+  }
+  const safeLead = calculation === lead?.calculation ? lead : { ...lead, calculation };
   const title = cleanText(lead?.bitrix?.title, 200) || (leadType === 'recruitment' ? 'Отклик сиделки с сайта' : 'Заявка на подбор ухода с сайта');
   const fields = { TITLE: `${title} — ${name}`, CONTACT_ID: contactId };
-  if (siteNoteField) fields[siteNoteField] = buildSiteNote(lead);
-  const calculatorDetails = buildCalculatorDetails(lead);
+  if (siteNoteField) fields[siteNoteField] = buildSiteNote(safeLead);
+  const calculatorDetails = buildCalculatorDetails(safeLead);
   if (calculatorDetailsField && calculatorDetails) fields[calculatorDetailsField] = calculatorDetails;
   if (categories[leadType] !== '') fields.CATEGORY_ID = Number(categories[leadType]);
-  return bitrixCall('crm.deal.add', { fields });
+  const dealId = await bitrixCall('crm.deal.add', { fields });
+  if (productRows?.length) await bitrixCall('crm.deal.productrows.set', { id: dealId, rows: productRows });
+  return dealId;
 }
 
 function setNestedValue(target, path, value) {
@@ -639,6 +781,18 @@ createServer(async (request, response) => {
       'Cache-Control': 'no-store'
     });
     return createReadStream(pagePath).pipe(response);
+  }
+
+  // Публичный калькулятор не хранит вебхук: он получает только разрешённые
+  // позиции и цены через этот серверный прокси. Так Bitrix24 остаётся
+  // единственным источником цен, а секрет интеграции не попадает на сайт.
+  if (request.method === 'GET' && url.pathname === '/api/calculator/catalog') {
+    try {
+      return json(response, 200, { ok: true, catalog: await getCalculatorCatalog() });
+    } catch (error) {
+      console.error('Calculator catalog read failed:', error.message);
+      return json(response, 503, { ok: false, error: 'Каталог калькулятора временно недоступен' });
+    }
   }
 
   if (request.method === 'POST' && url.pathname === '/api/leads') {
