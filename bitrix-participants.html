@@ -121,6 +121,23 @@
           })));
       }
 
+      async function ensurePlacementTitle() {
+        const titleVersion = 'contact-customer-title-v1';
+        if (sessionStorage.getItem(titleVersion)) return;
+        const widgetUrl = `${location.origin}/api/bitrix/participants/widget`;
+        await call('placement.unbind', {
+          PLACEMENT: 'CRM_DEAL_DETAIL_TAB',
+          HANDLER: widgetUrl
+        });
+        await call('placement.bind', {
+          PLACEMENT: 'CRM_DEAL_DETAIL_TAB',
+          HANDLER: widgetUrl,
+          TITLE: 'Контакт заказчика',
+          LANG_ALL: { ru: { TITLE: 'Контакт заказчика' } }
+        });
+        sessionStorage.setItem(titleVersion, '1');
+      }
+
       function contactId(value) {
         const match = String(value || '').match(/(?:C_)?(\d+)/);
         return match ? Number(match[1]) : 0;
@@ -262,6 +279,7 @@
       try {
         b24 = await B24Js.initializeB24Frame();
         await ensureContactTypeNames();
+        await ensurePlacementTitle().catch(error => console.warn('Не удалось обновить название вкладки:', error));
         dealId = Number(b24.placement?.options?.ID || 0);
         if (!Number.isInteger(dealId) || dealId <= 0) throw new Error('Не удалось определить сделку. Откройте вкладку из карточки сделки.');
         await refresh();
