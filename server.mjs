@@ -14,6 +14,10 @@ const categories = {
 // Поле сделки «Рекомендация с сайта». Переменная окружения позволяет
 // переопределить код для другого портала, а этот код — текущий рабочий портал.
 const siteNoteField = (process.env.BITRIX_SITE_NOTE_FIELD || 'UF_CRM_1786668098223').trim();
+// Многострочное поле сделки «Расчёт из калькулятора». Старое поле с краткой
+// заметкой сохраняем на время проверки, чтобы менеджеры могли сравнить оба
+// варианта на тестовых заявках.
+const calculatorDetailsField = (process.env.BITRIX_CALCULATOR_DETAILS_FIELD || 'UF_CRM_1787042892').trim();
 // Настройки кастомного коннектора Открытой линии. Они намеренно находятся
 // только на сервере: токены Bitrix24 никогда не отдаются в браузер.
 const openLine = {
@@ -371,6 +375,49 @@ function buildSiteNote(lead) {
   return lines.join('\n');
 }
 
+function formatRubles(value) {
+  const amount = numberOrZero(value);
+  return amount ? `${amount.toLocaleString('ru-RU')} ₽` : '';
+}
+
+function buildCalculatorDetails(lead) {
+  if (lead?.form !== 'care_calculator' || !lead.calculation || typeof lead.calculation !== 'object') return '';
+
+  const calculation = lead.calculation;
+  const blocks = ['РАСЧЁТ УХОДА С САЙТА'];
+  const request = [];
+  if (cleanText(calculation.baseLabel, 200)) request.push(`Услуга: ${cleanText(calculation.baseLabel, 200)}`);
+  if (numberOrZero(calculation.quantity)) request.push(`${cleanText(calculation.qtyLabel, 100) || 'Количество'}: ${numberOrZero(calculation.quantity)}`);
+  if (request.length) blocks.push(request.join('\n'));
+
+  const prices = [];
+  if (numberOrZero(calculation.shiftPrice)) prices.push(`Стоимость за выход / смену / сутки: ${formatRubles(calculation.shiftPrice)}`);
+  if (numberOrZero(calculation.periodPrice)) prices.push(`Стоимость по выбранному периоду: ${formatRubles(calculation.periodPrice)}`);
+  if (numberOrZero(calculation.monthPrice)) prices.push(`Стоимость при 30 ${cleanText(calculation.qtyWord, 50) || 'выходах / сутках'}: ${formatRubles(calculation.monthPrice)}`);
+  if (prices.length) blocks.push(`СТОИМОСТЬ\n${prices.join('\n')}`);
+
+  const person = [];
+  if (cleanText(calculation.age, 50)) person.push(`Возраст: ${cleanText(calculation.age, 50)}`);
+  if (cleanText(calculation.gender, 100)) person.push(`Пол: ${cleanText(calculation.gender, 100)}`);
+  if (cleanText(calculation.bedridden, 200)) person.push(`Состояние: ${cleanText(calculation.bedridden, 200)}`);
+  if (person.length) blocks.push(`ДАННЫЕ ПОДОПЕЧНОГО\n${person.join('\n')}`);
+
+  const breakdown = Array.isArray(calculation.breakdown)
+    ? calculation.breakdown.map(item => cleanText(item, 300)).filter(Boolean)
+    : [];
+  if (breakdown.length) blocks.push(`УСЛОВИЯ И НАДБАВКИ\n${breakdown.map(item => `• ${item}`).join('\n')}`);
+
+  const situations = Array.isArray(lead.selectedSituations)
+    ? lead.selectedSituations.map(item => cleanText(item, 300)).filter(Boolean)
+    : [];
+  if (situations.length) blocks.push(`СИТУАЦИЯ КЛИЕНТА\n${situations.map(item => `• ${item}`).join('\n')}`);
+
+  const comment = cleanText(calculation.comment, 2000);
+  if (comment) blocks.push(`КОММЕНТАРИЙ КЛИЕНТА\n${comment}`);
+
+  return blocks.join('\n\n');
+}
+
 function numberOrZero(value) {
   const number = Number(value);
   return Number.isFinite(number) && number > 0 ? number : 0;
@@ -393,6 +440,8 @@ async function createBitrixDeal(lead) {
   const title = cleanText(lead?.bitrix?.title, 200) || (leadType === 'recruitment' ? 'Отклик сиделки с сайта' : 'Заявка на подбор ухода с сайта');
   const fields = { TITLE: `${title} — ${name}`, CONTACT_ID: contactId };
   if (siteNoteField) fields[siteNoteField] = buildSiteNote(lead);
+  const calculatorDetails = buildCalculatorDetails(lead);
+  if (calculatorDetailsField && calculatorDetails) fields[calculatorDetailsField] = calculatorDetails;
   if (categories[leadType] !== '') fields.CATEGORY_ID = Number(categories[leadType]);
   return bitrixCall('crm.deal.add', { fields });
 }
