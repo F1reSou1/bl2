@@ -171,7 +171,6 @@
 
       async function refresh() {
         deal = await call('crm.deal.get', { id: dealId });
-        await ensureCustomerContactSectionTitle().catch(error => console.warn('Не удалось переименовать раздел контакта:', error));
         const contactBindings = await call('crm.deal.contact.items.get', { id: dealId });
         const primaryContact = (Array.isArray(contactBindings) ? contactBindings : [])
           .find(binding => binding.IS_PRIMARY === 'Y')
@@ -186,27 +185,6 @@
         for (const [key, value] of Object.entries(values)) contacts[key] = await getContact(value);
         contactsByRole = contacts;
         render(contacts);
-      }
-
-      async function ensureCustomerContactSectionTitle() {
-        const categoryId = Number(deal?.CATEGORY_ID || 0);
-        const versionKey = `customer-contact-section-${categoryId}`;
-        if (sessionStorage.getItem(versionKey)) return;
-        const extras = { dealCategoryId: categoryId };
-        // В карточке может быть личная конфигурация менеджера, которая перекрывает общую.
-        // Сначала меняем её, а если её нет — общую конфигурацию воронки.
-        for (const scope of ['P', 'C']) {
-          const configuration = await call('crm.deal.details.configuration.get', { scope, extras });
-          if (!Array.isArray(configuration)) continue;
-          const titleNeedsChange = configuration.some(section => section?.title === 'Участники сделки');
-          if (!titleNeedsChange) continue;
-          const data = configuration.map(section => section.title === 'Участники сделки'
-            ? { ...section, title: 'Контакт заказчика' }
-            : section);
-          await call('crm.deal.details.configuration.set', { scope, extras, data });
-          sessionStorage.setItem(versionKey, '1');
-          return;
-        }
       }
 
       function openDialog(roleKey) {
