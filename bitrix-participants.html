@@ -113,7 +113,7 @@
       }
 
       function contactId(value) {
-        const match = String(value || '').match(/(?:C_)?(\\d+)/);
+        const match = String(value || '').match(/(?:C_)?(\d+)/);
         return match ? Number(match[1]) : 0;
       }
 
