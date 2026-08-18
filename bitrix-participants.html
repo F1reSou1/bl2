@@ -97,6 +97,21 @@
         return response.getData()?.result;
       }
 
+      async function ensureContactTypeNames() {
+        const expectedNames = {
+          CLIENT: 'Заказчик',
+          SUPPLIER: 'Подопечный',
+          PARTNER: 'Сиделка / исполнитель'
+        };
+        const types = await call('crm.status.list', { filter: { ENTITY_ID: 'CONTACT_TYPE' } });
+        await Promise.all((Array.isArray(types) ? types : [])
+          .filter(type => expectedNames[type.STATUS_ID] && type.NAME !== expectedNames[type.STATUS_ID])
+          .map(type => call('crm.status.update', {
+            id: Number(type.ID),
+            fields: { NAME: expectedNames[type.STATUS_ID] }
+          })));
+      }
+
       function contactId(value) {
         const match = String(value || '').match(/(?:C_)?(\\d+)/);
         return match ? Number(match[1]) : 0;
@@ -187,6 +202,7 @@
 
       try {
         b24 = await B24Js.initializeB24Frame();
+        await ensureContactTypeNames();
         dealId = Number(b24.placement?.options?.ID || 0);
         if (!Number.isInteger(dealId) || dealId <= 0) throw new Error('Не удалось определить сделку. Откройте вкладку из карточки сделки.');
         await refresh();
