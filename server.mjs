@@ -1,5 +1,5 @@
 import { createReadStream, existsSync, promises as fs } from 'node:fs';
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { createServer } from 'node:http';
 import { dirname, extname, join, normalize, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -7,6 +7,9 @@ import { fileURLToPath } from 'node:url';
 const siteRoot = resolve(fileURLToPath(new URL('.', import.meta.url)));
 const port = Number(process.env.PORT || 80);
 const bitrixWebhookUrl = (process.env.BITRIX_WEBHOOK_URL || '').replace(/\/$/, '');
+const bitrixWebhookFingerprint = bitrixWebhookUrl
+  ? createHash('sha256').update(bitrixWebhookUrl).digest('hex').slice(0, 12)
+  : 'missing';
 const categories = {
   client: process.env.BITRIX_CLIENT_CATEGORY_ID || '',
   recruitment: process.env.BITRIX_RECRUITMENT_CATEGORY_ID || ''
@@ -790,7 +793,7 @@ createServer(async (request, response) => {
     try {
       return json(response, 200, { ok: true, catalog: await getCalculatorCatalog() });
     } catch (error) {
-      console.error('Calculator catalog read failed:', error.message);
+      console.error(`Calculator catalog read failed (webhook ${bitrixWebhookFingerprint}):`, error.message);
       return json(response, 503, { ok: false, error: 'Каталог калькулятора временно недоступен' });
     }
   }
