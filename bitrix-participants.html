@@ -176,6 +176,7 @@
           recipient: deal.UF_CRM_CARE_RECIPIENT,
           executor: deal.UF_CRM_CARE_EXECUTOR
         };
+        await ensureRoleContactsOnDeal(values, contactBindings);
         const contacts = {};
         for (const [key, value] of Object.entries(values)) contacts[key] = await getContact(value);
         contactsByRole = contacts;
@@ -209,6 +210,27 @@
           }))
         ];
         await call('crm.deal.contact.items.set', { id: dealId, items });
+      }
+
+      async function ensureRoleContactsOnDeal(values, contactBindings) {
+        const roleIds = [...new Set(Object.values(values).map(contactId).filter(Boolean))];
+        if (!roleIds.length) return;
+        const bindings = Array.isArray(contactBindings) ? contactBindings : [];
+        const bindingIds = bindings.map(binding => Number(binding.CONTACT_ID));
+        const customerId = contactId(values.customer);
+        const primaryId = bindings.find(binding => binding.IS_PRIMARY === 'Y')?.CONTACT_ID;
+        const needsSync = roleIds.some(id => !bindingIds.includes(id)) || (customerId && Number(primaryId) !== customerId);
+        if (!needsSync) return;
+        const ids = [...new Set([...roleIds, ...bindingIds])];
+        const primary = customerId || Number(primaryId) || ids[0];
+        await call('crm.deal.contact.items.set', {
+          id: dealId,
+          items: ids.map((id, index) => ({
+            CONTACT_ID: id,
+            IS_PRIMARY: id === primary ? 'Y' : 'N',
+            SORT: index === 0 ? 10 : (index + 1) * 10
+          }))
+        });
       }
 
       async function assignContact(id, updateType, address) {
