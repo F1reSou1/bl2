@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Участники сделки</title>
+  <title>Контакт заказчика</title>
   <style>
     :root { color: #24333f; font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
     * { box-sizing: border-box; }
@@ -15,7 +15,8 @@
     .role { min-height: 164px; padding: 16px; border: 1px solid #d7e8e2; border-radius: 14px; background: #fff; box-shadow: 0 4px 16px rgba(10, 113, 100, .05); }
     .role h2 { margin: 0 0 8px; font-size: 17px; }
     .role p { min-height: 42px; margin: 0 0 14px; color: #61717b; }
-    .person { min-height: 22px; margin: 0 0 12px; font-weight: 600; }
+    .person { min-height: 22px; margin: 0 0 4px; font-weight: 600; }
+    .person-address { min-height: 20px; margin: 0 0 12px; color: #61717b; font-size: 13px; }
     button { border: 0; border-radius: 9px; padding: 9px 12px; font: inherit; font-weight: 600; cursor: pointer; background: #0a7164; color: #fff; }
     button.secondary { background: #e4f2ee; color: #075c52; }
     button:disabled { cursor: wait; opacity: .65; }
@@ -39,8 +40,8 @@
 </head>
 <body>
   <main>
-    <h1>Участники сделки</h1>
-    <p class="hint">Создавайте или выбирайте человека сразу в его роли. Новые контакты получают нужный тип автоматически.</p>
+    <h1>Контакты сделки</h1>
+    <p class="hint">Создавайте или выбирайте человека сразу в его роли. Каждый выбранный человек автоматически прикрепляется к сделке.</p>
     <section class="roles" id="roles"></section>
     <div id="status" class="status">Загружаю данные сделки…</div>
   </main>
@@ -57,6 +58,10 @@
       <div class="search-results" id="search-results"></div>
       <label for="person-phone">Телефон — при создании нового контакта</label>
       <input id="person-phone" name="phone" autocomplete="tel" maxlength="40" placeholder="Необязательно для подопечного">
+      <label for="person-address">Адрес</label>
+      <input id="person-address" name="address" autocomplete="street-address" maxlength="500" list="address-suggestions" placeholder="Начните вводить адрес">
+      <datalist id="address-suggestions"></datalist>
+      <small>Подсказки берутся из адресов, уже сохранённых в CRM. Полный адрес можно затем уточнить в карточке контакта Bitrix.</small>
       <label class="check"><input id="change-type" type="checkbox"><span>Изменить тип выбранного существующего контакта на эту роль</span></label>
       <div class="dialog-actions">
         <button type="button" class="secondary" id="cancel-button">Отмена</button>
@@ -79,12 +84,16 @@
       const form = document.getElementById('person-form');
       const nameInput = document.getElementById('person-name');
       const phoneInput = document.getElementById('person-phone');
+      const addressInput = document.getElementById('person-address');
+      const addressSuggestions = document.getElementById('address-suggestions');
       const searchResults = document.getElementById('search-results');
       const changeType = document.getElementById('change-type');
       let b24;
       let dealId;
       let deal;
       let activeRole;
+      let contactsByRole = {};
+      let addressSearchTimer;
 
       function setStatus(message, isError) {
         status.textContent = message;
@@ -126,10 +135,15 @@
         return [contact?.NAME, contact?.SECOND_NAME, contact?.LAST_NAME].filter(Boolean).join(' ') || 'Без имени';
       }
 
+      function escapeHtml(value) {
+        return String(value || '').replace(/[&<>'"]/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[character]);
+      }
+
       function render(contacts) {
         rolesNode.innerHTML = Object.entries(roleDefinitions).map(([key, role]) => {
           const person = contacts[key];
-          return `<article class="role"><h2>${role.title}</h2><p>${role.description}</p><div class="person">${person ? fullName(person) : 'Не назначен'}</div><button data-role="${key}">${person ? 'Изменить' : 'Добавить'}</button></article>`;
+          const address = person?.ADDRESS ? `<div class="person-address">${escapeHtml(person.ADDRESS)}</div>` : '<div class="person-address">Адрес не указан</div>';
+          return `<article class="role"><h2>${role.title}</h2><p>${role.description}</p><div class="person">${person ? escapeHtml(fullName(person)) : 'Не назначен'}</div>${address}<button data-role="${key}">${person ? 'Изменить' : 'Добавить'}</button></article>`;
         }).join('');
         rolesNode.querySelectorAll('[data-role]').forEach(button => button.addEventListener('click', () => openDialog(button.dataset.role)));
       }
@@ -147,6 +161,7 @@
         };
         const contacts = {};
         for (const [key, value] of Object.entries(values)) contacts[key] = await getContact(value);
+        contactsByRole = contacts;
         render(contacts);
       }
 
@@ -155,32 +170,39 @@
         document.getElementById('dialog-title').textContent = `Добавить: ${activeRole.title}`;
         document.getElementById('dialog-description').textContent = 'Сначала можно найти готовый контакт. Если его нет — заполните имя и создайте новый.';
         form.reset();
+        addressInput.value = contactsByRole[roleKey]?.ADDRESS || '';
         searchResults.innerHTML = '';
         dialog.showModal();
         nameInput.focus();
       }
 
-      async function assignContact(id, updateType) {
-        if (updateType) await call('crm.contact.update', { id, fields: { TYPE_ID: activeRole.typeId } });
-        if (activeRole.binding === 'primary-contact') {
-          const currentBindings = await call('crm.deal.contact.items.get', { id: dealId });
-          const bindings = Array.isArray(currentBindings) ? currentBindings : [];
-          const selectedBinding = bindings.find(binding => Number(binding.CONTACT_ID) === id);
-          const otherBindings = bindings.filter(binding => Number(binding.CONTACT_ID) !== id);
-          const items = [
-            { CONTACT_ID: id, IS_PRIMARY: 'Y', SORT: Number(selectedBinding?.SORT) || 10 },
-            ...otherBindings.map((binding, index) => ({
-              CONTACT_ID: Number(binding.CONTACT_ID),
-              IS_PRIMARY: 'N',
-              SORT: Number(binding.SORT) || (index + 2) * 10
-            }))
-          ];
-          await call('crm.deal.contact.items.set', { id: dealId, items });
-        } else {
-          await call('crm.deal.update', { id: dealId, fields: { [activeRole.field]: `C_${id}` } });
-        }
+      async function syncDealContact(id, makePrimary) {
+        const currentBindings = await call('crm.deal.contact.items.get', { id: dealId });
+        const bindings = Array.isArray(currentBindings) ? currentBindings : [];
+        const selectedBinding = bindings.find(binding => Number(binding.CONTACT_ID) === id);
+        const otherBindings = bindings.filter(binding => Number(binding.CONTACT_ID) !== id);
+        const hasPrimary = otherBindings.some(binding => binding.IS_PRIMARY === 'Y');
+        const selectedIsPrimary = makePrimary || !hasPrimary;
+        const items = [
+          { CONTACT_ID: id, IS_PRIMARY: selectedIsPrimary ? 'Y' : 'N', SORT: Number(selectedBinding?.SORT) || 10 },
+          ...otherBindings.map((binding, index) => ({
+            CONTACT_ID: Number(binding.CONTACT_ID),
+            IS_PRIMARY: makePrimary ? 'N' : binding.IS_PRIMARY === 'Y' ? 'Y' : 'N',
+            SORT: Number(binding.SORT) || (index + 2) * 10
+          }))
+        ];
+        await call('crm.deal.contact.items.set', { id: dealId, items });
+      }
+
+      async function assignContact(id, updateType, address) {
+        const contactFields = {};
+        if (updateType) contactFields.TYPE_ID = activeRole.typeId;
+        if (address) contactFields.ADDRESS = address;
+        if (Object.keys(contactFields).length) await call('crm.contact.update', { id, fields: contactFields });
+        if (activeRole.field) await call('crm.deal.update', { id: dealId, fields: { [activeRole.field]: `C_${id}` } });
+        await syncDealContact(id, activeRole.binding === 'primary-contact');
         dialog.close();
-        setStatus(`${activeRole.title}: контакт назначен.`);
+        setStatus(`${activeRole.title}: контакт назначен и добавлен в сделку.`);
         await refresh();
       }
 
@@ -190,13 +212,31 @@
         if (query.length < 2) return setStatus('Введите хотя бы две буквы имени для поиска.', true);
         searchResults.textContent = 'Ищу…';
         try {
-          const result = await call('crm.contact.list', { order: { NAME: 'ASC' }, filter: { '%NAME': query }, select: ['ID', 'NAME', 'SECOND_NAME', 'LAST_NAME', 'PHONE', 'TYPE_ID'] });
+          const result = await call('crm.contact.list', { order: { NAME: 'ASC' }, filter: { '%NAME': query }, select: ['ID', 'NAME', 'SECOND_NAME', 'LAST_NAME', 'PHONE', 'TYPE_ID', 'ADDRESS'] });
           searchResults.innerHTML = result.length ? result.slice(0, 10).map(contact => {
             const phone = Array.isArray(contact.PHONE) && contact.PHONE[0]?.VALUE ? contact.PHONE[0].VALUE : 'без телефона';
-            return `<div class="result"><span><strong>${fullName(contact)}</strong><small>${phone}</small></span><button type="button" class="secondary" data-contact-id="${contact.ID}">Выбрать</button></div>`;
+            const address = contact.ADDRESS ? ` · ${escapeHtml(contact.ADDRESS)}` : '';
+            return `<div class="result"><span><strong>${escapeHtml(fullName(contact))}</strong><small>${escapeHtml(phone)}${address}</small></span><button type="button" class="secondary" data-contact-id="${contact.ID}">Выбрать</button></div>`;
           }).join('') : 'Совпадений нет. Можно создать новый контакт.';
-          searchResults.querySelectorAll('[data-contact-id]').forEach(button => button.addEventListener('click', () => assignContact(Number(button.dataset.contactId), changeType.checked).catch(showError)));
+          searchResults.querySelectorAll('[data-contact-id]').forEach(button => button.addEventListener('click', () => {
+            const contact = result.find(item => Number(item.ID) === Number(button.dataset.contactId));
+            if (!addressInput.value.trim() && contact?.ADDRESS) addressInput.value = contact.ADDRESS;
+            assignContact(Number(button.dataset.contactId), changeType.checked, addressInput.value.trim()).catch(showError);
+          }));
         } catch (error) { showError(error); }
+      });
+
+      addressInput.addEventListener('input', () => {
+        clearTimeout(addressSearchTimer);
+        const query = addressInput.value.trim();
+        if (query.length < 3) return addressSuggestions.innerHTML = '';
+        addressSearchTimer = setTimeout(async () => {
+          try {
+            const result = await call('crm.contact.list', { order: { DATE_MODIFY: 'DESC' }, filter: { '%ADDRESS': query }, select: ['ADDRESS'] });
+            const addresses = [...new Set((Array.isArray(result) ? result : []).map(contact => contact.ADDRESS).filter(Boolean))].slice(0, 8);
+            addressSuggestions.innerHTML = addresses.map(address => `<option value="${escapeHtml(address)}"></option>`).join('');
+          } catch (_) { addressSuggestions.innerHTML = ''; }
+        }, 300);
       });
 
       function showError(error) { setStatus(error?.message || 'Не удалось выполнить действие.', true); }
@@ -210,9 +250,11 @@
         try {
           const fields = { NAME: name, TYPE_ID: activeRole.typeId };
           const phone = phoneInput.value.trim();
+          const address = addressInput.value.trim();
           if (phone) fields.PHONE = [{ VALUE: phone, VALUE_TYPE: 'WORK' }];
+          if (address) fields.ADDRESS = address;
           const id = await call('crm.contact.add', { fields });
-          await assignContact(Number(id), false);
+          await assignContact(Number(id), false, '');
         } catch (error) { showError(error); }
         finally { createButton.disabled = false; }
       });
