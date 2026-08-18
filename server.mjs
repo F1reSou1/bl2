@@ -623,6 +623,24 @@ createServer(async (request, response) => {
   const url = new URL(request.url || '/', 'http://localhost');
   if (request.method === 'GET' && url.pathname === '/health') return json(response, 200, { ok: true });
 
+  // Локальное приложение Bitrix24 передаёт контекст в POST-запросе к iframe.
+  // Поэтому эти две страницы отдаём и на GET, и на POST, хотя остальные
+  // статические файлы сайта доступны только для чтения.
+  const bitrixParticipantPages = {
+    '/api/bitrix/participants/install': 'bitrix-participants-install.html',
+    '/api/bitrix/participants/widget': 'bitrix-participants.html'
+  };
+  if ((request.method === 'GET' || request.method === 'POST') && bitrixParticipantPages[url.pathname]) {
+    const pagePath = join(siteRoot, bitrixParticipantPages[url.pathname]);
+    const stat = await fs.stat(pagePath);
+    response.writeHead(200, {
+      'Content-Type': 'text/html; charset=utf-8',
+      'Content-Length': stat.size,
+      'Cache-Control': 'no-store'
+    });
+    return createReadStream(pagePath).pipe(response);
+  }
+
   if (request.method === 'POST' && url.pathname === '/api/leads') {
     try {
       const lead = await readJson(request);

@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Участники сделки</title>
+  <style>
+    :root { color: #24333f; font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #f7faf9; }
+    main { max-width: 940px; margin: 0 auto; padding: 24px; }
+    h1 { margin: 0; font-size: 23px; color: #0a7164; }
+    .hint { margin: 6px 0 20px; color: #60707d; }
+    .roles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+    .role { min-height: 164px; padding: 16px; border: 1px solid #d7e8e2; border-radius: 14px; background: #fff; box-shadow: 0 4px 16px rgba(10, 113, 100, .05); }
+    .role h2 { margin: 0 0 8px; font-size: 17px; }
+    .role p { min-height: 42px; margin: 0 0 14px; color: #61717b; }
+    .person { min-height: 22px; margin: 0 0 12px; font-weight: 600; }
+    button { border: 0; border-radius: 9px; padding: 9px 12px; font: inherit; font-weight: 600; cursor: pointer; background: #0a7164; color: #fff; }
+    button.secondary { background: #e4f2ee; color: #075c52; }
+    button:disabled { cursor: wait; opacity: .65; }
+    .status { margin-top: 16px; padding: 11px 13px; border-radius: 9px; background: #edf8f4; color: #075c52; }
+    .status.error { background: #fff0f0; color: #a22d2d; }
+    dialog { width: min(540px, calc(100% - 28px)); padding: 0; border: 0; border-radius: 16px; box-shadow: 0 20px 65px rgba(22, 35, 47, .28); }
+    dialog::backdrop { background: rgba(19, 39, 48, .4); }
+    .dialog { padding: 22px; }
+    .dialog h2 { margin: 0 0 4px; }
+    .dialog p { margin: 0 0 16px; color: #667784; }
+    label { display: block; margin: 12px 0 5px; font-weight: 600; }
+    input { width: 100%; padding: 10px 11px; border: 1px solid #c7d6d2; border-radius: 8px; font: inherit; }
+    .check { display: flex; gap: 8px; align-items: flex-start; margin-top: 12px; color: #50606d; }
+    .check input { width: auto; margin-top: 4px; }
+    .search-results { margin-top: 12px; max-height: 160px; overflow: auto; }
+    .result { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 9px 0; border-top: 1px solid #edf1f0; }
+    .result small { display: block; color: #75838d; }
+    .dialog-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 20px; }
+    @media (max-width: 700px) { .roles { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Участники сделки</h1>
+    <p class="hint">Создавайте или выбирайте человека сразу в его роли. Новые контакты получают нужный тип автоматически.</p>
+    <section class="roles" id="roles"></section>
+    <div id="status" class="status">Загружаю данные сделки…</div>
+  </main>
+
+  <dialog id="person-dialog">
+    <form class="dialog" method="dialog" id="person-form">
+      <h2 id="dialog-title">Добавить участника</h2>
+      <p id="dialog-description"></p>
+      <label for="person-name">Имя или ФИО</label>
+      <input id="person-name" name="name" autocomplete="name" required maxlength="120">
+      <div class="dialog-actions" style="justify-content:flex-start; margin-top:10px">
+        <button type="button" class="secondary" id="search-button">Найти в контактах</button>
+      </div>
+      <div class="search-results" id="search-results"></div>
+      <label for="person-phone">Телефон — при создании нового контакта</label>
+      <input id="person-phone" name="phone" autocomplete="tel" maxlength="40" placeholder="Необязательно для подопечного">
+      <label class="check"><input id="change-type" type="checkbox"><span>Изменить тип выбранного существующего контакта на эту роль</span></label>
+      <div class="dialog-actions">
+        <button type="button" class="secondary" id="cancel-button">Отмена</button>
+        <button type="submit" id="create-button">Создать и назначить</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="https://unpkg.com/@bitrix24/b24jssdk@1/dist/umd/index.min.js"></script>
+  <script>
+    (async () => {
+      const roleDefinitions = {
+        customer: { title: 'Заказчик', description: 'Обращается, принимает решения и оплачивает услугу.', typeId: 'CLIENT', field: 'CONTACT_ID' },
+        recipient: { title: 'Подопечный', description: 'Человек, которому требуется уход.', typeId: 'SUPPLIER', field: 'UF_CRM_CARE_RECIPIENT' },
+        executor: { title: 'Сиделка / исполнитель', description: 'Назначенный исполнитель по сделке.', typeId: 'PARTNER', field: 'UF_CRM_CARE_EXECUTOR' }
+      };
+      const status = document.getElementById('status');
+      const rolesNode = document.getElementById('roles');
+      const dialog = document.getElementById('person-dialog');
+      const form = document.getElementById('person-form');
+      const nameInput = document.getElementById('person-name');
+      const phoneInput = document.getElementById('person-phone');
+      const searchResults = document.getElementById('search-results');
+      const changeType = document.getElementById('change-type');
+      let b24;
+      let dealId;
+      let deal;
+      let activeRole;
+
+      function setStatus(message, isError) {
+        status.textContent = message;
+        status.classList.toggle('error', Boolean(isError));
+      }
+
+      async function call(method, params) {
+        const response = await b24.actions.v2.call.make({ method, params, requestId: crypto.randomUUID() });
+        if (!response.isSuccess) throw new Error(response.getErrorMessages().join('; ') || `Не выполнен ${method}`);
+        return response.getData()?.result;
+      }
+
+      function contactId(value) {
+        const match = String(value || '').match(/(?:C_)?(\\d+)/);
+        return match ? Number(match[1]) : 0;
+      }
+
+      async function getContact(value) {
+        const id = contactId(value);
+        return id ? call('crm.contact.get', { id }) : null;
+      }
+
+      function fullName(contact) {
+        return [contact?.NAME, contact?.SECOND_NAME, contact?.LAST_NAME].filter(Boolean).join(' ') || 'Без имени';
+      }
+
+      function render(contacts) {
+        rolesNode.innerHTML = Object.entries(roleDefinitions).map(([key, role]) => {
+          const person = contacts[key];
+          return `<article class="role"><h2>${role.title}</h2><p>${role.description}</p><div class="person">${person ? fullName(person) : 'Не назначен'}</div><button data-role="${key}">${person ? 'Изменить' : 'Добавить'}</button></article>`;
+        }).join('');
+        rolesNode.querySelectorAll('[data-role]').forEach(button => button.addEventListener('click', () => openDialog(button.dataset.role)));
+      }
+
+      async function refresh() {
+        deal = await call('crm.deal.get', { id: dealId });
+        const values = {
+          customer: deal.CONTACT_ID,
+          recipient: deal.UF_CRM_CARE_RECIPIENT,
+          executor: deal.UF_CRM_CARE_EXECUTOR
+        };
+        const contacts = {};
+        for (const [key, value] of Object.entries(values)) contacts[key] = await getContact(value);
+        render(contacts);
+      }
+
+      function openDialog(roleKey) {
+        activeRole = roleDefinitions[roleKey];
+        document.getElementById('dialog-title').textContent = `Добавить: ${activeRole.title}`;
+        document.getElementById('dialog-description').textContent = 'Сначала можно найти готовый контакт. Если его нет — заполните имя и создайте новый.';
+        form.reset();
+        searchResults.innerHTML = '';
+        dialog.showModal();
+        nameInput.focus();
+      }
+
+      async function assignContact(id, updateType) {
+        if (updateType) await call('crm.contact.update', { id, fields: { TYPE_ID: activeRole.typeId } });
+        const fields = activeRole.field === 'CONTACT_ID'
+          ? { CONTACT_ID: id }
+          : { [activeRole.field]: `C_${id}` };
+        await call('crm.deal.update', { id: dealId, fields });
+        dialog.close();
+        setStatus(`${activeRole.title}: контакт назначен.`);
+        await refresh();
+      }
+
+      document.getElementById('cancel-button').addEventListener('click', () => dialog.close());
+      document.getElementById('search-button').addEventListener('click', async () => {
+        const query = nameInput.value.trim();
+        if (query.length < 2) return setStatus('Введите хотя бы две буквы имени для поиска.', true);
+        searchResults.textContent = 'Ищу…';
+        try {
+          const result = await call('crm.contact.list', { order: { NAME: 'ASC' }, filter: { '%NAME': query }, select: ['ID', 'NAME', 'SECOND_NAME', 'LAST_NAME', 'PHONE', 'TYPE_ID'] });
+          searchResults.innerHTML = result.length ? result.slice(0, 10).map(contact => {
+            const phone = Array.isArray(contact.PHONE) && contact.PHONE[0]?.VALUE ? contact.PHONE[0].VALUE : 'без телефона';
+            return `<div class="result"><span><strong>${fullName(contact)}</strong><small>${phone}</small></span><button type="button" class="secondary" data-contact-id="${contact.ID}">Выбрать</button></div>`;
+          }).join('') : 'Совпадений нет. Можно создать новый контакт.';
+          searchResults.querySelectorAll('[data-contact-id]').forEach(button => button.addEventListener('click', () => assignContact(Number(button.dataset.contactId), changeType.checked).catch(showError)));
+        } catch (error) { showError(error); }
+      });
+
+      function showError(error) { setStatus(error?.message || 'Не удалось выполнить действие.', true); }
+
+      form.addEventListener('submit', async event => {
+        event.preventDefault();
+        const name = nameInput.value.trim();
+        if (name.length < 2) return setStatus('Введите имя контакта.', true);
+        const createButton = document.getElementById('create-button');
+        createButton.disabled = true;
+        try {
+          const fields = { NAME: name, TYPE_ID: activeRole.typeId };
+          const phone = phoneInput.value.trim();
+          if (phone) fields.PHONE = [{ VALUE: phone, VALUE_TYPE: 'WORK' }];
+          const id = await call('crm.contact.add', { fields });
+          await assignContact(Number(id), false);
+        } catch (error) { showError(error); }
+        finally { createButton.disabled = false; }
+      });
+
+      try {
+        b24 = await B24Js.initializeB24Frame();
+        dealId = Number(b24.placement?.options?.ID || 0);
+        if (!Number.isInteger(dealId) || dealId <= 0) throw new Error('Не удалось определить сделку. Откройте вкладку из карточки сделки.');
+        await refresh();
+        setStatus('Готово. Выберите роль, затем контакт или создание нового контакта.');
+      } catch (error) { showError(error); }
+    })();
+  </script>
+</body>
+</html>
