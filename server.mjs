@@ -61,10 +61,7 @@ const openLine = {
   connectorId: (process.env.BITRIX_OPENLINE_CONNECTOR_ID || 'blizkie_site_chat').trim(),
   publicUrl: (process.env.PUBLIC_SITE_URL || '').trim().replace(/\/$/, ''),
   oauthUrl: (process.env.BITRIX_OPENLINE_OAUTH_URL || 'https://oauth.bitrix.info/oauth/token/').trim(),
-  storePath: resolve(process.env.CHAT_BRIDGE_STORE_PATH || join(siteRoot, 'data', 'openline-chat.json')),
-  timezone: (process.env.CHAT_MANAGER_TIMEZONE || 'Asia/Vladivostok').trim(),
-  startHour: Number(process.env.CHAT_MANAGER_START_HOUR || 9),
-  endHour: Number(process.env.CHAT_MANAGER_END_HOUR || 20)
+  storePath: resolve(process.env.CHAT_BRIDGE_STORE_PATH || join(siteRoot, 'data', 'openline-chat.json'))
 };
 const connectorIcon = {
   DATA_IMAGE: 'data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%2070%2071%22%3E%3Crect%20width%3D%2270%22%20height%3D%2271%22%20rx%3D%2216%22%20fill%3D%22%230a7164%22/%3E%3Cpath%20d%3D%22M17%2020h36v25H31l-10%208v-8h-4z%22%20fill%3D%22white%22/%3E%3C/svg%3E',
@@ -235,14 +232,6 @@ async function bitrixOpenLineCall(method, payload, authOverride) {
   return body.result;
 }
 
-function getManagerSchedule() {
-  const parts = new Intl.DateTimeFormat('en-GB', {
-    timeZone: openLine.timezone, hour: '2-digit', hourCycle: 'h23'
-  }).formatToParts(new Date());
-  const hour = Number(parts.find(part => part.type === 'hour')?.value || 0);
-  return { online: hour >= openLine.startHour && hour < openLine.endHour, hour };
-}
-
 function createExternalChatId() {
   return `bl_${randomBytes(24).toString('base64url')}`;
 }
@@ -293,12 +282,6 @@ async function sendVisitorMessage(chatId, text, options = {}) {
 
 async function startManagerChat(payload) {
   if (!isOpenLineConfigured()) throw new Error('Коннектор Открытой линии ещё не настроен');
-  const schedule = getManagerSchedule();
-  if (!schedule.online) {
-    const error = new Error('Менеджеры сейчас не в сети');
-    error.code = 'AFTER_HOURS';
-    throw error;
-  }
   const store = await getBridgeStore();
   if (!store.auth || !store.lineId) throw new Error('Открытая линия ещё не включена');
   const chatId = createExternalChatId();
@@ -974,9 +957,8 @@ createServer(async (request, response) => {
       const session = await startManagerChat(await readJson(request));
       return json(response, 201, { ok: true, ...session });
     } catch (error) {
-      const afterHours = error.code === 'AFTER_HOURS';
       console.error('Manager handoff failed:', error.message);
-      return json(response, afterHours ? 409 : 503, { ok: false, code: afterHours ? 'AFTER_HOURS' : 'UNAVAILABLE' });
+      return json(response, 503, { ok: false, code: 'UNAVAILABLE' });
     }
   }
 
