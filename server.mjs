@@ -394,13 +394,27 @@ function dynamicCareKey(productId) {
   return `care_${Number(productId)}`;
 }
 
+function dynamicCareMarker(product) {
+  const externalCode = cleanText(product?.CODE || product?.XML_ID, 100).toLowerCase();
+  if (/^calculator_care_[a-z0-9_-]+$/i.test(externalCode)) return externalCode;
+  // Некоторые версии CRM Product API не отдают «Внешний код» в списке,
+  // хотя он сохранён в интерфейсе. В этом случае работает тот же маркер
+  // отдельной строкой в описании товара.
+  const description = cleanText(product?.DESCRIPTION, 500).toLowerCase();
+  const match = description.match(/(?:^|\n)\s*\[?(calculator_care_[a-z0-9_-]+)\]?\s*(?:\n|$)/i);
+  return match ? match[1].toLowerCase() : '';
+}
+
+function visibleProductDescription(product) {
+  return cleanText(product?.DESCRIPTION, 500)
+    .replace(/(?:^|\n)\s*\[?calculator_care_[a-z0-9_-]+\]?\s*(?=\n|$)/ig, '')
+    .trim();
+}
+
 function isDynamicCareProduct(product, legacyIds) {
   const id = Number(product?.ID);
   const name = cleanText(product?.NAME, 300);
-  // В CRM-каталоге Bitrix поле «Символьный код» может не быть выведено
-  // в карточку. «Внешний код» (XML_ID) доступен всегда, поэтому принимаем
-  // маркер из любого из этих двух полей.
-  const code = cleanText(product?.CODE || product?.XML_ID, 100).toLowerCase();
+  const code = dynamicCareMarker(product);
   if (!id || !name || legacyIds.has(id) || product?.ACTIVE === 'N') return false;
   // В каталоге есть служебные, тестовые и разовые позиции. Поэтому новый
   // тип ухода попадает на публичный сайт только по явному маркеру, а не по
@@ -432,7 +446,7 @@ async function getCalculatorCatalog(force = false) {
     price: currencyNumber(product?.PRICE),
     currency: cleanText(product?.CURRENCY_ID, 10) || 'RUB',
     percent: percentageFromProductName(product?.NAME),
-    description: cleanText(product?.DESCRIPTION, 500),
+    description: visibleProductDescription(product),
     imageUrl: productPictureAvailable(product) ? `/api/calculator/catalog/image/${Number(product?.ID)}` : ''
   });
 
