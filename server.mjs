@@ -399,12 +399,11 @@ function isDynamicCareProduct(product, legacyIds) {
   const name = cleanText(product?.NAME, 300);
   const code = cleanText(product?.CODE, 100).toLowerCase();
   if (!id || !name || legacyIds.has(id) || product?.ACTIVE === 'N') return false;
-  // Служебные товары можно явно скрыть из калькулятора кодом hide_from_calculator.
-  if (code === 'hide_from_calculator') return false;
-  // Надбавки исторически определены как отдельные товары. Новый тип ухода
-  // добавляется просто новой активной карточкой товара; «Надбавка:» остаётся
-  // в блоке условий и не превращается в базовую услугу.
-  return !/^надбавка\s*:/i.test(name);
+  // В каталоге есть служебные, тестовые и разовые позиции. Поэтому новый
+  // тип ухода попадает на публичный сайт только по явному маркеру, а не по
+  // одному названию. Менеджер указывает его один раз в поле «Символьный код»
+  // карточки товара: calculator_care_<любой_код>.
+  return /^calculator_care_[a-z0-9_-]+$/i.test(code);
 }
 
 async function getCalculatorCatalog(force = false) {
