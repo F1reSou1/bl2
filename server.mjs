@@ -397,7 +397,10 @@ function dynamicCareKey(productId) {
 function isDynamicCareProduct(product, legacyIds) {
   const id = Number(product?.ID);
   const name = cleanText(product?.NAME, 300);
-  const code = cleanText(product?.CODE, 100).toLowerCase();
+  // В CRM-каталоге Bitrix поле «Символьный код» может не быть выведено
+  // в карточку. «Внешний код» (XML_ID) доступен всегда, поэтому принимаем
+  // маркер из любого из этих двух полей.
+  const code = cleanText(product?.CODE || product?.XML_ID, 100).toLowerCase();
   if (!id || !name || legacyIds.has(id) || product?.ACTIVE === 'N') return false;
   // В каталоге есть служебные, тестовые и разовые позиции. Поэтому новый
   // тип ухода попадает на публичный сайт только по явному маркеру, а не по
@@ -414,7 +417,7 @@ async function getCalculatorCatalog(force = false) {
   const products = await bitrixCall('crm.product.list', {
     order: { ID: 'ASC' },
     filter: { CATALOG_ID: calculatorCatalogId },
-    select: ['ID', 'NAME', 'PRICE', 'CURRENCY_ID', 'CODE', 'DESCRIPTION', 'ACTIVE', 'PREVIEW_PICTURE', 'DETAIL_PICTURE']
+    select: ['ID', 'NAME', 'PRICE', 'CURRENCY_ID', 'CODE', 'XML_ID', 'DESCRIPTION', 'ACTIVE', 'PREVIEW_PICTURE', 'DETAIL_PICTURE']
   });
   const byId = new Map(indexedValues(products).map(product => [Number(product?.ID), product]));
   const missing = Object.entries(calculatorProductIds)
