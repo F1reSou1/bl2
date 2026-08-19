@@ -3566,6 +3566,10 @@
                 </div>
               </label>
             </div>
+            <div id="dynamicCarePlansWrap" class="hidden mt-5">
+              <p class="text-sm font-semibold text-gray-700 mb-3">Другие виды ухода</p>
+              <div id="dynamicCarePlans" class="grid grid-cols-1 sm:grid-cols-2 gap-3"></div>
+            </div>
           </div>
 
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -3810,6 +3814,66 @@
     if (description) description.textContent = suffix || (product.percent ? '+' + product.percent + '% к базовой цене' : formatRub(product.price));
   }
 
+  function dynamicCareMeta(key) {
+    const product = catalogItem(key);
+    if (!product || !Array.isArray(calculatorCatalog?.dynamicCarePlans) || !calculatorCatalog.dynamicCarePlans.some(function(item) { return item.key === key; })) return null;
+    return {
+      key: product.key,
+      label: product.name,
+      price: Number(product.price || 0),
+      unit: 'выход',
+      durationHours: 0,
+      minQty: 1,
+      maxQty: 30,
+      qtyLabel: 'Количество выходов',
+      qtyWord: 'выход(ов)',
+      incoming: true,
+      dynamic: true
+    };
+  }
+
+  function renderDynamicCarePlans() {
+    const wrap = document.getElementById('dynamicCarePlansWrap');
+    const container = document.getElementById('dynamicCarePlans');
+    if (!wrap || !container) return;
+    const plans = Array.isArray(calculatorCatalog?.dynamicCarePlans) ? calculatorCatalog.dynamicCarePlans : [];
+    container.replaceChildren();
+    plans.forEach(function(product) {
+      const label = document.createElement('label');
+      label.className = 'relative cursor-pointer';
+      const input = document.createElement('input');
+      input.type = 'radio';
+      input.name = 'carePlan';
+      input.value = product.key;
+      input.className = 'peer sr-only';
+      input.addEventListener('change', updateCareCalc);
+
+      const card = document.createElement('div');
+      card.className = 'p-4 rounded-xl border-2 border-gray-200 peer-checked:border-brand-500 peer-checked:bg-brand-50 transition-all hover:border-gray-300 h-full flex gap-3';
+      if (product.imageUrl) {
+        const image = document.createElement('img');
+        image.src = product.imageUrl;
+        image.alt = product.name;
+        image.className = 'h-14 w-14 shrink-0 rounded-lg object-cover bg-brand-50';
+        image.addEventListener('error', function() { image.remove(); });
+        card.appendChild(image);
+      }
+      const text = document.createElement('span');
+      text.className = 'block min-w-0';
+      const title = document.createElement('strong');
+      title.className = 'block text-gray-800';
+      title.textContent = product.name;
+      const description = document.createElement('span');
+      description.className = 'block mt-1 text-xs text-gray-500';
+      description.textContent = (product.description ? product.description + ' · ' : '') + formatRub(product.price) + ' за выход';
+      text.append(title, description);
+      card.appendChild(text);
+      label.append(input, card);
+      container.appendChild(label);
+    });
+    wrap.classList.toggle('hidden', plans.length === 0);
+  }
+
   function applyCalculatorCatalog(catalog) {
     calculatorCatalog = catalog;
     for (let hours = 2; hours <= 12; hours++) HOURLY_PRICES[hours] = catalogPrice('hourly_' + hours);
@@ -3821,6 +3885,7 @@
         meta.price = product.price;
       }
     });
+    renderDynamicCarePlans();
 
     const hourlySelect = document.getElementById('careHours');
     if (hourlySelect) {
@@ -3897,7 +3962,7 @@
       const product = catalogItem('hourly_' + hours);
       return { key: 'hourly_' + hours, label: product?.name || 'Дневная почасовая', price: HOURLY_PRICES[hours] || 0, unit: 'выход', durationHours: hours, minQty: 1, maxQty: 30, qtyLabel: 'Количество выходов', qtyWord: 'выход(ов)', incoming: true };
     }
-    return CARE_PRICES[plan] || CARE_PRICES.hourly;
+    return dynamicCareMeta(plan) || CARE_PRICES[plan] || CARE_PRICES.hourly;
   }
 
   function fillQuantityOptions(plan, keepCurrent) {

@@ -35,6 +35,9 @@ const siteNoteField = (process.env.BITRIX_SITE_NOTE_FIELD || 'UF_CRM_17866680982
 // запроса посетителя: он остаётся менеджеру для сверки с товарами сделки.
 const calculatorDetailsField = (process.env.BITRIX_CALCULATOR_DETAILS_FIELD || 'UF_CRM_1787042892').trim();
 const calculatorCatalogId = Number(process.env.BITRIX_CALCULATOR_CATALOG_ID || 24);
+// Товары, для которых калькулятору нужны специальные правила: почасовой
+// формат, автоматические надбавки и особые минимальные сроки. Их ID
+// сохранены только для обратной совместимости с уже настроенным каталогом.
 const calculatorProductIds = {
   hourly_2: 20, hourly_3: 24, hourly_4: 28, hourly_5: 32, hourly_6: 36,
   hourly_7: 40, hourly_8: 44, hourly_9: 48, hourly_10: 52, hourly_11: 56, hourly_12: 60,
@@ -44,6 +47,10 @@ const calculatorProductIds = {
   surcharge_complex: 116, surcharge_pet: 120, surcharge_weekend: 124,
   surcharge_holiday_30: 128, surcharge_holiday_100: 132, one_time: 136
 };
+const calculatorBaseKeys = new Set([
+  'patronage', 'one_time', 'night_home', 'day_home', 'hospital_day',
+  'hospital_night', 'hospital_24', 'live_in'
+]);
 let calculatorCatalogCache = { expiresAt: 0, value: null };
 // Настройки кастомного коннектора Открытой линии. Они намеренно находятся
 // только на сервере: токены Bitrix24 никогда не отдаются в браузер.
@@ -379,6 +386,27 @@ function percentageFromProductName(name) {
   return match ? Number(match[1].replace(',', '.')) : 0;
 }
 
+function productPictureAvailable(product) {
+  return Boolean(product?.PREVIEW_PICTURE || product?.DETAIL_PICTURE);
+}
+
+function dynamicCareKey(productId) {
+  return `care_${Number(productId)}`;
+}
+
+function isDynamicCareProduct(product, legacyIds) {
+  const id = Number(product?.ID);
+  const name = cleanText(product?.NAME, 300);
+  const code = cleanText(product?.CODE, 100).toLowerCase();
+  if (!id || !name || legacyIds.has(id) || product?.ACTIVE === 'N') return false;
+  // Служебные товары можно явно скрыть из калькулятора кодом hide_from_calculator.
+  if (code === 'hide_from_calculator') return false;
+  // Надбавки исторически определены как отдельные товары. Новый тип ухода
+  // добавляется просто новой активной карточкой товара; «Надбавка:» остаётся
+  // в блоке условий и не превращается в базовую услугу.
+  return !/^надбавка\s*:/i.test(name);
+}
+
 async function getCalculatorCatalog(force = false) {
   if (!force && calculatorCatalogCache.value && calculatorCatalogCache.expiresAt > Date.now()) {
     return calculatorCatalogCache.value;
@@ -387,7 +415,7 @@ async function getCalculatorCatalog(force = false) {
   const products = await bitrixCall('crm.product.list', {
     order: { ID: 'ASC' },
     filter: { CATALOG_ID: calculatorCatalogId },
-    select: ['ID', 'NAME', 'PRICE', 'CURRENCY_ID']
+    select: ['ID', 'NAME', 'PRICE', 'CURRENCY_ID', 'CODE', 'DESCRIPTION', 'ACTIVE', 'PREVIEW_PICTURE', 'DETAIL_PICTURE']
   });
   const byId = new Map(indexedValues(products).map(product => [Number(product?.ID), product]));
   const missing = Object.entries(calculatorProductIds)
@@ -395,27 +423,69 @@ async function getCalculatorCatalog(force = false) {
     .map(([key]) => key);
   if (missing.length) throw new Error(`В каталоге Bitrix24 не найдены позиции калькулятора: ${missing.join(', ')}`);
 
+  const itemFromProduct = (key, product) => ({
+    id: Number(product?.ID),
+    key,
+    name: cleanText(product?.NAME, 300),
+    price: currencyNumber(product?.PRICE),
+    currency: cleanText(product?.CURRENCY_ID, 10) || 'RUB',
+    percent: percentageFromProductName(product?.NAME),
+    description: cleanText(product?.DESCRIPTION, 500),
+    imageUrl: productPictureAvailable(product) ? `/api/calculator/catalog/image/${Number(product?.ID)}` : ''
+  });
+
   const items = Object.fromEntries(Object.entries(calculatorProductIds).map(([key, id]) => {
     const product = byId.get(id);
-    return [key, {
-      id,
-      name: cleanText(product?.NAME, 300),
-      price: currencyNumber(product?.PRICE),
-      currency: cleanText(product?.CURRENCY_ID, 10) || 'RUB',
-      percent: percentageFromProductName(product?.NAME)
-    }];
+    return [key, itemFromProduct(key, product)];
   }));
-  const catalog = { catalogId: calculatorCatalogId, fetchedAt: new Date().toISOString(), items };
+
+  const legacyIds = new Set(Object.values(calculatorProductIds));
+  const dynamicCarePlans = indexedValues(products)
+    .filter(product => isDynamicCareProduct(product, legacyIds))
+    .map(product => itemFromProduct(dynamicCareKey(product.ID), product));
+  dynamicCarePlans.forEach(product => { items[product.key] = product; });
+
+  const catalog = {
+    catalogId: calculatorCatalogId,
+    fetchedAt: new Date().toISOString(),
+    items,
+    // Эти товары фронтенд добавляет к карточкам ухода сам. Для знакомых
+    // форматов остаются фирменные иллюстрации и специальные правила; новая
+    // карточка использует картинку из товара Bitrix24.
+    dynamicCarePlans
+  };
   calculatorCatalogCache = { value: catalog, expiresAt: Date.now() + 60_000 };
   return catalog;
 }
 
-function calculatorBaseKey(calculation) {
+function catalogProductFromResult(result) {
+  return result?.product || result?.PRODUCT || result || {};
+}
+
+async function getCalculatorProductImage(productId) {
+  const result = await bitrixCall('catalog.product.get', { id: Number(productId) });
+  const product = catalogProductFromResult(result);
+  const picture = product?.previewPicture || product?.PREVIEW_PICTURE || product?.detailPicture || product?.DETAIL_PICTURE;
+  const downloadPath = cleanText(picture?.urlMachine || picture?.url, 2000);
+  if (!downloadPath) return null;
+
+  const params = new URL(downloadPath, new URL(bitrixWebhookUrl).origin).searchParams;
+  const downloadUrl = new URL(`${bitrixWebhookUrl}/catalog.product.download`);
+  for (const [key, value] of params.entries()) downloadUrl.searchParams.set(key, value);
+  const response = await fetch(downloadUrl);
+  if (!response.ok) throw new Error(`Bitrix24 не отдал картинку товара (${response.status})`);
+  const contentType = cleanText(response.headers.get('content-type'), 100).toLowerCase();
+  if (!contentType.startsWith('image/')) throw new Error('Bitrix24 вернул некорректную картинку товара');
+  return { contentType, body: Buffer.from(await response.arrayBuffer()) };
+}
+
+function calculatorBaseKey(calculation, catalog) {
   const plan = cleanText(calculation?.plan, 50);
   if (plan === 'hourly') {
     const hours = Math.min(12, Math.max(2, Math.round(Number(calculation?.hours) || 2)));
     return `hourly_${hours}`;
   }
+  if (catalog?.items?.[plan] && calculatorBaseKeys.has(plan) === false && plan.startsWith('care_')) return plan;
   return ['patronage', 'one_time', 'night_home', 'day_home', 'hospital_day', 'hospital_night', 'hospital_24', 'live_in'].includes(plan)
     ? plan
     : 'hourly_2';
@@ -443,7 +513,7 @@ function addPercentageRow(rows, catalog, key, quantity, basePrice) {
 }
 
 function buildCalculatorProductRows(calculation, catalog) {
-  const baseKey = calculatorBaseKey(calculation);
+  const baseKey = calculatorBaseKey(calculation, catalog);
   const base = catalog.items[baseKey];
   if (!base || !base.price) throw new Error(`В Bitrix24 не задана цена услуги «${base?.name || baseKey}»`);
   const quantity = calculatorQuantity(calculation, baseKey);
@@ -558,8 +628,9 @@ function numberOrZero(value) {
 }
 
 function enrichCalculatorSnapshot(calculation, catalog, productRows) {
-  const base = catalog.items[calculatorBaseKey(calculation)];
-  const quantity = calculatorQuantity(calculation, calculatorBaseKey(calculation));
+  const baseKey = calculatorBaseKey(calculation, catalog);
+  const base = catalog.items[baseKey];
+  const quantity = calculatorQuantity(calculation, baseKey);
   return {
     ...calculation,
     baseLabel: base.name,
@@ -809,6 +880,23 @@ createServer(async (request, response) => {
     } catch (error) {
       console.error('Calculator catalog read failed:', error.message);
       return json(response, 503, { ok: false, error: 'Каталог калькулятора временно недоступен' });
+    }
+  }
+
+  const calculatorImageMatch = url.pathname.match(/^\/api\/calculator\/catalog\/image\/(\d+)$/);
+  if (request.method === 'GET' && calculatorImageMatch) {
+    try {
+      const image = await getCalculatorProductImage(Number(calculatorImageMatch[1]));
+      if (!image) return json(response, 404, { ok: false, error: 'У товара нет картинки' });
+      response.writeHead(200, {
+        'Content-Type': image.contentType,
+        'Content-Length': image.body.length,
+        'Cache-Control': 'public, max-age=300'
+      });
+      return response.end(image.body);
+    } catch (error) {
+      console.error('Calculator product image read failed:', error.message);
+      return json(response, 404, { ok: false, error: 'Картинка товара временно недоступна' });
     }
   }
 
