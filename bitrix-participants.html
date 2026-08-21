@@ -137,6 +137,30 @@
         status.classList.toggle('error', Boolean(isError));
       }
 
+      function friendlyError(error, fallback = 'Не удалось выполнить действие.') {
+        const message = String(error?.message || error || '').trim();
+        const normalized = message.toLowerCase();
+        if (/no_auth_found|expired_token|invalid.*auth|не авториз/.test(normalized)) {
+          return 'Не удалось авторизоваться в Bitrix24. Переустановите приложение или попросите администратора обновить доступы.';
+        }
+        if (/insufficient_scope|access_denied|user_access_error|недостаточно прав|доступ запрещ/.test(normalized)) {
+          return 'У приложения недостаточно прав для этого действия. Администратору нужно проверить права CRM, Пользователи и Онлайн-запись, затем переустановить приложение.';
+        }
+        if (/catalog|каталог/.test(normalized)) {
+          return 'Онлайн-запись не смогла получить каталог ресурсов. Проверьте, что раздел «Онлайн-запись» включён, а у приложения есть право «Онлайн-запись». Затем переустановите приложение.';
+        }
+        if (/duplicate|already exists|уже существует|unique/.test(normalized)) {
+          return 'Такой ресурс или тип ресурса уже существует. Обновите вкладку и повторите действие — дубль создавать не нужно.';
+        }
+        if (/resource.*type|тип ресурс/.test(normalized)) {
+          return 'Не удалось найти или создать тип ресурса «Сиделка» в Онлайн-записи. Проверьте доступ к разделу Онлайн-запись.';
+        }
+        if (/waitlist|лист ожидания/.test(normalized)) {
+          return 'Не удалось создать или обновить запись в листе ожидания Онлайн-записи. Сделка сохранена; попробуйте открыть вкладку ещё раз.';
+        }
+        return fallback;
+      }
+
       async function call(method, params) {
         const response = await b24.actions.v2.call.make({ method, params, requestId: crypto.randomUUID() });
         if (!response.isSuccess) throw new Error(response.getErrorMessages().join('; ') || `Не выполнен ${method}`);
@@ -229,6 +253,19 @@
         });
       }
 
+      async function ensureCaregiverAvailability(resourceId) {
+        await call('booking.v1.resource.slots.set', {
+          resourceId,
+          slots: [{
+            from: 0,
+            to: 1440,
+            timezone: 'Asia/Vladivostok',
+            weekDays: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
+            slotSize: 30
+          }]
+        });
+      }
+
       async function ensureCaregiverResource(contact) {
         const name = fullName(contact);
         const typesResult = await call('booking.v1.resourceType.list', { filter: {}, order: { id: 'ASC' } });
@@ -239,13 +276,21 @@
             fields: {
               name: 'Сиделка', code: 'caregiver',
               isInfoNotificationOn: 'N', isConfirmationNotificationOn: 'N',
-              isReminderNotificationOn: 'N', isFeedbackNotificationOn: 'N', isDelayedNotificationOn: 'N'
+              isReminderNotificationOn: 'N', isFeedbackNotificationOn: 'N', isDelayedNotificationOn: 'N',
+              templateTypeInfo: 'animate', templateTypeConfirmation: 'animate',
+              templateTypeReminder: 'base', templateTypeFeedback: 'animate', templateTypeDelayed: 'animate',
+              infoDelay: 300, reminderDelay: -1, delayedDelay: 300, delayedCounterDelay: 7200,
+              confirmationDelay: 86400, confirmationRepetitions: 0,
+              confirmationRepetitionsInterval: 0, confirmationCounterDelay: 7200
             }
           });
           type = { id: Number(created?.id ?? created) };
         }
         const typeId = Number(type.id ?? type.ID);
-        const listed = await call('booking.v1.resource.list', { filter: { name }, order: { id: 'ASC' } });
+        const listed = await call('booking.v1.resource.list', {
+          filter: { searchQuery: name, typeId, isMain: 'Y' },
+          order: { id: 'ASC' }
+        });
         const resources = Array.isArray(listed) ? listed : (listed?.resources || listed?.items || []);
         let resource = resources.find(item => item.name === name && Number(item.typeId) === typeId);
         if (!resource) {
@@ -263,6 +308,8 @@
           resource = { id: Number(created?.id ?? created) };
         }
         const resourceId = Number(resource.id ?? resource.ID);
+        if (!resourceId) throw new Error('Не удалось определить ресурс сиделки в Онлайн-записи');
+        await ensureCaregiverAvailability(resourceId);
         await call('crm.deal.update', { id: dealId, fields: { [substitutionFields.resourceId]: resourceId } });
         deal[substitutionFields.resourceId] = resourceId;
         await ensureWaitlist();
@@ -400,10 +447,10 @@
           }
           if (activeRole.field === 'UF_CRM_CARE_EXECUTOR') {
             const resourceId = await ensureCaregiverResource(contact);
-            automationNote = ` Ресурс сиделки создан или найден (ID ${resourceId}).`;
+            automationNote = ` Ресурс сиделки создан или найден (ID ${resourceId}); доступность настроена 00:00–24:00.`;
           }
         } catch (error) {
-          automationNote = ` Онлайн-запись пока не синхронизирована: ${error.message}`;
+          automationNote = ` Онлайн-запись пока не синхронизирована: ${friendlyError(error, 'Проверьте доступ к Онлайн-записи и повторите действие.')}`;
         }
         setStatus(`${activeRole.title}: контакт назначен.${automationNote}`, automationNote.includes('не синхронизирована'));
         await refresh();
@@ -475,7 +522,7 @@
         } catch (error) { showError(error); }
       });
 
-      function showError(error) { setStatus(error?.message || 'Не удалось выполнить действие.', true); }
+      function showError(error) { setStatus(friendlyError(error), true); }
 
       form.addEventListener('submit', async event => {
         event.preventDefault();

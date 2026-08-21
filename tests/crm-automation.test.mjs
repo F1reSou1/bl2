@@ -48,8 +48,11 @@ test('server and deal widget contain required integration calls', async () => {
   for (const method of ['booking.v1.waitlist.add', 'booking.v1.waitlist.externalData.set', 'ASSIGNED_BY_ID']) {
     assert.ok(server.includes(method), `server must use ${method}`);
   }
-  for (const method of ['crm.timeline.comment.add', 'booking.v1.resource.add', 'booking.v1.waitlist.client.set']) {
+  for (const method of ['crm.timeline.comment.add', 'booking.v1.resource.add', 'booking.v1.resource.slots.set', 'booking.v1.waitlist.client.set']) {
     assert.ok(widget.includes(method), `widget must use ${method}`);
   }
   assert.match(widget, /Передать клиента/);
+  assert.match(widget, /from: 0/);
+  assert.match(widget, /to: 1440/);
+  assert.match(widget, /Asia\/Vladivostok/);
 });
