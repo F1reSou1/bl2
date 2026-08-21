@@ -269,7 +269,10 @@
       async function ensureCaregiverResource(contact) {
         const name = fullName(contact);
         const typesResult = await call('booking.v1.resourceType.list', { filter: {}, order: { id: 'ASC' } });
-        const types = Array.isArray(typesResult) ? typesResult : (typesResult?.resourceTypes || typesResult?.items || []);
+        // Both list methods return their collection in `result.resource`.
+        // Do not fall back to an empty array here: that made the application try
+        // to create a type/resource which already existed.
+        const types = Array.isArray(typesResult) ? typesResult : (typesResult?.resource || []);
         let type = types.find(item => item.code === 'caregiver' || item.name === 'Сиделка');
         if (!type) {
           const created = await call('booking.v1.resourceType.add', {
@@ -291,7 +294,7 @@
           filter: { searchQuery: name, typeId, isMain: 'Y' },
           order: { id: 'ASC' }
         });
-        const resources = Array.isArray(listed) ? listed : (listed?.resources || listed?.items || []);
+        const resources = Array.isArray(listed) ? listed : (listed?.resource || []);
         let resource = resources.find(item => item.name === name && Number(item.typeId) === typeId);
         if (!resource) {
           const created = await call('booking.v1.resource.add', {
