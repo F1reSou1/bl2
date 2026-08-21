@@ -54,6 +54,9 @@ test('server and deal widget contain required integration calls', async () => {
   assert.match(widget, /resourceNeedsUpdate/);
   assert.match(widget, /retryFind/);
   assert.match(widget, /canonicalName/);
+  assert.match(widget, /resourceType/);
+  assert.match(widget, /itemName/);
+  assert.match(widget, /itemId/);
   assert.match(widget, /searchQuery: 'Сиделка'/);
   assert.match(widget, /filter: \{ searchQuery: contactNumber \}/);
   assert.match(widget, /filter: \{ name: 'Сиделка' \}/);

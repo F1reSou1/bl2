@@ -269,6 +269,25 @@
           }
           return null;
         };
+        const listItems = payload => {
+          if (Array.isArray(payload)) return payload;
+          for (const key of ['resource', 'resourceType', 'items']) {
+            if (Array.isArray(payload?.[key])) return payload[key];
+          }
+          return [];
+        };
+        const field = (item, ...keys) => {
+          for (const key of keys) {
+            if (item?.[key] !== undefined && item?.[key] !== null) return item[key];
+          }
+          return undefined;
+        };
+        const itemName = item => field(item, 'name', 'NAME');
+        const itemCode = item => field(item, 'code', 'CODE');
+        const itemId = item => Number(field(item, 'id', 'ID'));
+        const itemTypeId = item => Number(field(item, 'typeId', 'TYPE_ID'));
+        const itemDescription = item => field(item, 'description', 'DESCRIPTION');
+        const itemIsMain = item => field(item, 'isMain', 'IS_MAIN');
         // The CRM contact number makes the resource name stable and unique.
         // Legacy/manual resources are still reused when they clearly belong
         // to this contact, so deployment does not create unnecessary copies.
@@ -277,8 +296,8 @@
             filter: { name },
             order: { id: 'ASC' }
           });
-          const resources = Array.isArray(listed) ? listed : (listed?.resource || []);
-          const exact = resources.find(item => canonicalName(item.name) === canonicalName(name));
+          const resources = listItems(listed);
+          const exact = resources.find(item => canonicalName(itemName(item)) === canonicalName(name));
           if (exact) return exact;
 
           // Exact filtering in Booking can miss a resource immediately after
@@ -288,17 +307,17 @@
             filter: { searchQuery: contactNumber },
             order: { id: 'ASC' }
           });
-          const searchedResources = Array.isArray(searched) ? searched : (searched?.resource || []);
-          return searchedResources.find(item => canonicalName(item.name) === canonicalName(name));
+          const searchedResources = listItems(searched);
+          return searchedResources.find(item => canonicalName(itemName(item)) === canonicalName(name));
         };
         const findCaregiverResource = async typeId => {
           const numbered = await findResourceByName(resourceName);
           if (numbered) return numbered;
           const legacy = await findResourceByName(caregiverName);
           if (!legacy) return null;
-          const description = String(legacy.description || '');
+          const description = String(itemDescription(legacy) || '');
           const belongsToAnotherContact = /контакт C_\d+/.test(description) && !description.includes(contactMarker);
-          const belongsToAnotherType = Number(legacy.typeId) !== typeId;
+          const belongsToAnotherType = itemTypeId(legacy) !== typeId;
           return belongsToAnotherContact || belongsToAnotherType ? null : legacy;
         };
         const findCaregiverType = async () => {
@@ -306,8 +325,8 @@
             filter: { code: 'caregiver' },
             order: { id: 'ASC' }
           });
-          const codedTypes = Array.isArray(byCode) ? byCode : (byCode?.resource || []);
-          const codedType = codedTypes.find(item => item.code === 'caregiver');
+          const codedTypes = listItems(byCode);
+          const codedType = codedTypes.find(item => itemCode(item) === 'caregiver');
           if (codedType) return codedType;
 
           // The Online Booking type may have been created manually before
@@ -318,8 +337,8 @@
             filter: { name: 'Сиделка' },
             order: { id: 'ASC' }
           });
-          const namedTypes = Array.isArray(byName) ? byName : (byName?.resource || []);
-          const namedType = namedTypes.find(item => canonicalName(item.name) === canonicalName('Сиделка'));
+          const namedTypes = listItems(byName);
+          const namedType = namedTypes.find(item => canonicalName(itemName(item)) === canonicalName('Сиделка'));
           if (namedType) return namedType;
 
           // Manually created types often have a generated internal code and
@@ -329,8 +348,8 @@
             filter: { searchQuery: 'Сиделка' },
             order: { id: 'ASC' }
           });
-          const searchedTypes = Array.isArray(bySearch) ? bySearch : (bySearch?.resource || []);
-          return searchedTypes.find(item => canonicalName(item.name) === canonicalName('Сиделка'))
+          const searchedTypes = listItems(bySearch);
+          return searchedTypes.find(item => canonicalName(itemName(item)) === canonicalName('Сиделка'))
             || searchedTypes[0]
             || null;
         };
@@ -358,7 +377,7 @@
             if (!type) throw error;
           }
         }
-        const typeId = Number(type.id ?? type.ID);
+        const typeId = itemId(type);
         let resource = await findCaregiverResource(typeId);
         let resourceWasCreated = false;
         if (!resource) {
@@ -385,16 +404,16 @@
             if (!resource) throw error;
           }
         }
-        let resourceId = Number(resource.id ?? resource.ID);
+        let resourceId = itemId(resource);
         if (!resourceId) throw new Error('resource id is missing');
         // A legacy/manual resource may have a plain name or be hidden from
         // the main schedule. Do not update a resource just created with these
         // exact values: Bitrix may incorrectly treat that as a duplicate.
         const resourceNeedsUpdate = !resourceWasCreated && (
-          resource.name !== resourceName
-          || String(resource.description || '') !== resourceDescription
-          || Number(resource.typeId) !== typeId
-          || resource.isMain !== 'Y'
+          itemName(resource) !== resourceName
+          || String(itemDescription(resource) || '') !== resourceDescription
+          || itemTypeId(resource) !== typeId
+          || itemIsMain(resource) !== 'Y'
         );
         if (resourceNeedsUpdate) {
           try {
@@ -413,7 +432,7 @@
             const numbered = await retryFind(() => findResourceByName(resourceName));
             if (!numbered) throw error;
             resource = numbered;
-            resourceId = Number(numbered.id ?? numbered.ID);
+            resourceId = itemId(numbered);
           }
         }
         await ensureCaregiverAvailability(resourceId);
