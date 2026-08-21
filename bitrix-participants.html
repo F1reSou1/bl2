@@ -254,6 +254,16 @@
         const contactNumber = String(Number(contact.ID)).padStart(4, '0');
         const resourceName = `Сиделка-${contactNumber} — ${caregiverName}`;
         const contactMarker = `контакт C_${contact.ID}`;
+        const resourceDescription = `Сиделка из CRM, ${contactMarker}`;
+        const wait = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
+        const retryFind = async finder => {
+          for (const pause of [0, 150, 350, 700]) {
+            if (pause) await wait(pause);
+            const found = await finder();
+            if (found) return found;
+          }
+          return null;
+        };
         // The CRM contact number makes the resource name stable and unique.
         // Legacy/manual resources are still reused when they clearly belong
         // to this contact, so deployment does not create unnecessary copies.
@@ -313,18 +323,21 @@
             });
             type = { id: Number(created?.id ?? created) };
           } catch (error) {
-            type = await findCaregiverType();
+            // Bitrix can report a duplicate before the just-created or
+            // manually-created type becomes visible to the list method.
+            type = await retryFind(findCaregiverType);
             if (!type) throw error;
           }
         }
         const typeId = Number(type.id ?? type.ID);
         let resource = await findCaregiverResource(typeId);
+        let resourceWasCreated = false;
         if (!resource) {
           try {
             const created = await call('booking.v1.resource.add', {
               fields: {
                 name: resourceName,
-                description: `Сиделка из CRM, ${contactMarker}`,
+                description: resourceDescription,
                 typeId,
                 // Managers plan visits directly in Online Booking, therefore
                 // every caregiver must be visible as a calendar column.
@@ -335,24 +348,45 @@
               }
             });
             resource = { id: Number(created?.id ?? created) };
+            resourceWasCreated = true;
           } catch (error) {
-            resource = await findCaregiverResource(typeId);
+            // A duplicate may mean that another request created the same
+            // resource a fraction of a second earlier. Re-read and reuse it.
+            resource = await retryFind(() => findCaregiverResource(typeId));
             if (!resource) throw error;
           }
         }
-        const resourceId = Number(resource.id ?? resource.ID);
+        let resourceId = Number(resource.id ?? resource.ID);
         if (!resourceId) throw new Error('resource id is missing');
         // A legacy/manual resource may have a plain name or be hidden from
-        // the main schedule. Normalize it before the manager creates visits.
-        await call('booking.v1.resource.update', {
-          id: resourceId,
-          fields: {
-            name: resourceName,
-            description: `Сиделка из CRM, ${contactMarker}`,
-            typeId,
-            isMain: 'Y'
+        // the main schedule. Do not update a resource just created with these
+        // exact values: Bitrix may incorrectly treat that as a duplicate.
+        const resourceNeedsUpdate = !resourceWasCreated && (
+          resource.name !== resourceName
+          || String(resource.description || '') !== resourceDescription
+          || Number(resource.typeId) !== typeId
+          || resource.isMain !== 'Y'
+        );
+        if (resourceNeedsUpdate) {
+          try {
+            await call('booking.v1.resource.update', {
+              id: resourceId,
+              fields: {
+                name: resourceName,
+                description: resourceDescription,
+                typeId,
+                isMain: 'Y'
+              }
+            });
+          } catch (error) {
+            // If a numbered resource already exists, prefer it over renaming
+            // a legacy resource into a conflicting name.
+            const numbered = await retryFind(() => findResourceByName(resourceName));
+            if (!numbered) throw error;
+            resource = numbered;
+            resourceId = Number(numbered.id ?? numbered.ID);
           }
-        });
+        }
         await ensureCaregiverAvailability(resourceId);
         await call('crm.deal.update', { id: dealId, fields: { [substitutionFields.resourceId]: resourceId } });
         deal[substitutionFields.resourceId] = resourceId;

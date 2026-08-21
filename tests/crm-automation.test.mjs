@@ -50,6 +50,9 @@ test('server and deal widget contain required integration calls', async () => {
   assert.match(widget, /Сиделка-\$\{contactNumber\}/);
   assert.match(widget, /padStart\(4, '0'\)/);
   assert.match(widget, /contactMarker/);
+  assert.match(widget, /resourceWasCreated/);
+  assert.match(widget, /resourceNeedsUpdate/);
+  assert.match(widget, /retryFind/);
   assert.match(widget, /filter: \{ name: 'Сиделка' \}/);
   assert.match(widget, /isMain: 'Y'/);
   assert.match(widget, /Открыть Онлайн-запись/);
