@@ -25,6 +25,9 @@
     button:disabled { cursor: wait; opacity: .65; }
     .status { margin-top: 16px; padding: 11px 13px; border-radius: 9px; background: #edf8f4; color: #075c52; }
     .status.error { background: #fff0f0; color: #a22d2d; }
+    .booking-guide { margin-top: 16px; padding: 16px; border: 1px solid #d7e8e2; border-radius: 14px; background: #fff; }
+    .booking-guide h2 { margin: 0 0 6px; font-size: 17px; }
+    .booking-guide p { margin: 0 0 12px; color: #61717b; }
     dialog { width: min(540px, calc(100% - 28px)); padding: 0; border: 0; border-radius: 16px; box-shadow: 0 20px 65px rgba(22, 35, 47, .28); }
     dialog::backdrop { background: rgba(19, 39, 48, .4); }
     .dialog { padding: 22px; }
@@ -52,6 +55,11 @@
     </section>
     <section class="roles" id="roles"></section>
     <div id="status" class="status">Загружаю данные сделки…</div>
+    <section class="booking-guide">
+      <h2>График в Онлайн-записи</h2>
+      <p>Нажмите нужное время именно в колонке сиделки, затем выберите подопечного как клиента CRM. Запись без ресурса сиделки во внешнее расписание не попадёт.</p>
+      <button type="button" class="secondary" id="open-booking-button">Открыть Онлайн-запись</button>
+    </section>
   </main>
 
   <dialog id="person-dialog">
@@ -245,12 +253,24 @@
           return resources.find(item => item.name === name);
         };
         const findCaregiverType = async () => {
-          const listed = await call('booking.v1.resourceType.list', {
+          const byCode = await call('booking.v1.resourceType.list', {
             filter: { code: 'caregiver' },
             order: { id: 'ASC' }
           });
-          const types = Array.isArray(listed) ? listed : (listed?.resource || []);
-          return types.find(item => item.code === 'caregiver');
+          const codedTypes = Array.isArray(byCode) ? byCode : (byCode?.resource || []);
+          const codedType = codedTypes.find(item => item.code === 'caregiver');
+          if (codedType) return codedType;
+
+          // The Online Booking type may have been created manually before
+          // the CRM app existed, so its internal code can differ. Reuse the
+          // exact visible type "Сиделка" instead of trying to create a
+          // duplicate with the same name.
+          const byName = await call('booking.v1.resourceType.list', {
+            filter: { name: 'Сиделка' },
+            order: { id: 'ASC' }
+          });
+          const namedTypes = Array.isArray(byName) ? byName : (byName?.resource || []);
+          return namedTypes.find(item => item.name === 'Сиделка');
         };
 
         let resource = await findResourceByName();
@@ -283,10 +303,9 @@
                 name,
                 description: `Сиделка из CRM, контакт C_${contact.ID}`,
                 typeId,
-                // Caregivers are selected explicitly by the manager when a
-                // booking is created. A resource must not overwrite the main
-                // calendar column just because a new deal was created.
-                isMain: 'N',
+                // Managers plan visits directly in Online Booking, therefore
+                // every caregiver must be visible as a calendar column.
+                isMain: 'Y',
                 isInfoNotificationOn: 'N', isConfirmationNotificationOn: 'N',
                 isReminderNotificationOn: 'N', isFeedbackNotificationOn: 'N', isDelayedNotificationOn: 'N',
                 templateTypeInfo: 'animate', templateTypeConfirmation: 'animate', templateTypeFeedback: 'animate', templateTypeDelayed: 'animate'
@@ -420,6 +439,11 @@
         const domain = new URLSearchParams(location.search).get('DOMAIN');
         if (domain) window.open(`https://${domain}/crm/contact/details/${Number(id)}/`, '_blank');
       }
+
+      document.getElementById('open-booking-button').addEventListener('click', () => {
+        const domain = new URLSearchParams(location.search).get('DOMAIN');
+        if (domain) window.open(`https://${domain}/booking/`, '_blank');
+      });
 
       async function assignContact(id, updateType) {
         const contactFields = {};
