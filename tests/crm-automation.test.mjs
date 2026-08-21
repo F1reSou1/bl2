@@ -2,7 +2,6 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
 import {
-  buildBookingWaitlistNote,
   chooseNextManager,
   isSubstitutionActive,
   parseIdList
@@ -29,28 +28,19 @@ test('substitution remains active through the selected end date', () => {
   assert.equal(isSubstitutionActive('2026-08-20', new Date('2026-08-21T00:00:00')), false);
 });
 
-test('waitlist note contains deal, service and remaining manager action', () => {
-  const note = buildBookingWaitlistNote({
-    dealId: 52,
-    title: 'Расчёт ухода с сайта — Ксения',
-    lead: { calculation: { baseLabel: 'Почасовой уход — 4 часа' } }
-  });
-  assert.match(note, /Сделка #52/);
-  assert.match(note, /Почасовой уход/);
-  assert.match(note, /Сиделка и график/);
-});
-
 test('server and deal widget contain required integration calls', async () => {
   const [server, widget] = await Promise.all([
     readFile(new URL('../server.mjs', import.meta.url), 'utf8'),
     readFile(new URL('../bitrix-participants.html', import.meta.url), 'utf8')
   ]);
-  for (const method of ['booking.v1.waitlist.add', 'booking.v1.waitlist.externalData.set', 'ASSIGNED_BY_ID']) {
+  for (const method of ['ASSIGNED_BY_ID']) {
     assert.ok(server.includes(method), `server must use ${method}`);
   }
-  for (const method of ['crm.timeline.comment.add', 'booking.v1.resource.add', 'booking.v1.resource.slots.set', 'booking.v1.waitlist.client.set']) {
+  for (const method of ['crm.timeline.comment.add', 'booking.v1.resource.add', 'booking.v1.resource.slots.set']) {
     assert.ok(widget.includes(method), `widget must use ${method}`);
   }
+  assert.doesNotMatch(server, /booking\.v1\.waitlist\./);
+  assert.doesNotMatch(widget, /booking\.v1\.waitlist\./);
   assert.match(widget, /Передать клиента/);
   assert.match(widget, /from: 0/);
   assert.match(widget, /to: 1440/);

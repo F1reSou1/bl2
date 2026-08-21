@@ -3,7 +3,7 @@ import { randomBytes } from 'node:crypto';
 import { createServer } from 'node:http';
 import { dirname, extname, join, normalize, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { buildBookingWaitlistNote, chooseNextManager, isSubstitutionActive, parseIdList } from './crm-automation.mjs';
+import { chooseNextManager, isSubstitutionActive, parseIdList } from './crm-automation.mjs';
 
 const siteRoot = resolve(fileURLToPath(new URL('.', import.meta.url)));
 const port = Number(process.env.PORT || 80);
@@ -41,7 +41,6 @@ const calculatorCatalogId = Number(process.env.BITRIX_CALCULATOR_CATALOG_ID || 2
 // сохранены только для обратной совместимости с уже настроенным каталогом.
 const managerIds = parseIdList(process.env.BITRIX_MANAGER_IDS || '12,16,18');
 const fallbackManagerId = Number(process.env.BITRIX_FALLBACK_MANAGER_ID || 1);
-const bookingEnabled = /^(1|true|yes|y)$/i.test((process.env.BITRIX_BOOKING_ENABLED || 'true').trim());
 const routingStorePath = resolve(process.env.CRM_ROUTING_STORE_PATH || join(siteRoot, 'data', 'crm-routing.json'));
 const substitutionFields = {
   original: (process.env.BITRIX_SUBSTITUTION_ORIGINAL_FIELD || 'UF_CRM_SUBSTITUTION_ORIGINAL').trim(),
@@ -49,7 +48,6 @@ const substitutionFields = {
   until: (process.env.BITRIX_SUBSTITUTION_UNTIL_FIELD || 'UF_CRM_SUBSTITUTION_UNTIL').trim(),
   comment: (process.env.BITRIX_SUBSTITUTION_COMMENT_FIELD || 'UF_CRM_SUBSTITUTION_COMMENT').trim()
 };
-const bookingWaitlistField = (process.env.BITRIX_BOOKING_WAITLIST_FIELD || 'UF_CRM_BOOKING_WAITLIST_ID').trim();
 const calculatorProductIds = {
   hourly_2: 20, hourly_3: 24, hourly_4: 28, hourly_5: 32, hourly_6: 36,
   hourly_7: 40, hourly_8: 44, hourly_9: 48, hourly_10: 52, hourly_11: 56, hourly_12: 60,
@@ -459,34 +457,6 @@ function nextAssignedManager() {
   return assignment;
 }
 
-async function createBookingWaitlist(dealId, title, lead) {
-  if (!bookingEnabled) return 0;
-  const result = await bitrixCall('booking.v1.waitlist.add', {
-    fields: { note: buildBookingWaitlistNote({ dealId, title, lead }) }
-  });
-  const waitListId = Number(result?.id ?? result) || 0;
-  if (!waitListId) throw new Error('Bitrix24 не вернул ID листа ожидания');
-  await bitrixCall('booking.v1.waitlist.externalData.set', {
-    waitListId,
-    externalData: [{ moduleId: 'crm', entityTypeId: 'DEAL', value: String(dealId) }]
-  });
-  if (bookingWaitlistField) {
-    try {
-      await bitrixCall('crm.deal.update', { id: dealId, fields: { [bookingWaitlistField]: waitListId } });
-    } catch (error) {
-      console.warn('Booking waitlist deal field was not updated:', error.message);
-    }
-  }
-  await bitrixCall('crm.timeline.comment.add', {
-    fields: {
-      ENTITY_ID: dealId,
-      ENTITY_TYPE: 'deal',
-      COMMENT: `Заявка автоматически добавлена в лист ожидания Онлайн-записи (ID ${waitListId}). Назначьте подопечного, сиделку и график.`
-    }
-  });
-  return waitListId;
-}
-
 async function restoreExpiredSubstitutions() {
   if (!bitrixWebhookUrl) return;
   let deals;
@@ -841,26 +811,7 @@ async function createBitrixDeal(lead) {
   if (categories[leadType] !== '') fields.CATEGORY_ID = Number(categories[leadType]);
   const dealId = await bitrixCall('crm.deal.add', { fields });
   if (productRows?.length) await bitrixCall('crm.deal.productrows.set', { id: dealId, rows: productRows });
-  let waitListId = 0;
-  if (leadType === 'client') {
-    try {
-      waitListId = await createBookingWaitlist(dealId, fields.TITLE, safeLead);
-    } catch (error) {
-      // Сделка уже создана: не отвечаем ошибкой и не провоцируем повторную
-      // отправку формы. Менеджер увидит сделку, даже если booking недоступен.
-      console.error('Booking waitlist creation failed:', error.message);
-      try {
-        await bitrixCall('crm.timeline.comment.add', {
-          fields: {
-            ENTITY_ID: dealId,
-            ENTITY_TYPE: 'deal',
-            COMMENT: `Онлайн-запись не создана автоматически: ${cleanText(error.message, 500)}. Добавьте заявку в лист ожидания вручную.`
-          }
-        });
-      } catch {}
-    }
-  }
-  return { dealId, assignedManagerId, waitListId };
+  return { dealId, assignedManagerId };
 }
 
 function setNestedValue(target, path, value) {

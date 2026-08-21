@@ -121,7 +121,6 @@
         replacement: 'UF_CRM_SUBSTITUTION_MANAGER',
         until: 'UF_CRM_SUBSTITUTION_UNTIL',
         comment: 'UF_CRM_SUBSTITUTION_COMMENT',
-        waitListId: 'UF_CRM_BOOKING_WAITLIST_ID',
         resourceId: 'UF_CRM_CARE_RESOURCE_ID'
       };
       let b24;
@@ -154,9 +153,6 @@
         }
         if (/resource.*type|тип ресурс/.test(normalized)) {
           return 'Не удалось найти или создать тип ресурса «Сиделка» в Онлайн-записи. Проверьте доступ к разделу Онлайн-запись.';
-        }
-        if (/waitlist|лист ожидания/.test(normalized)) {
-          return 'Не удалось создать или обновить запись в листе ожидания Онлайн-записи. Сделка сохранена; попробуйте открыть вкладку ещё раз.';
         }
         return fallback;
       }
@@ -223,36 +219,6 @@
         }
       }
 
-      async function ensureWaitlist() {
-        const existingId = Number(deal?.[substitutionFields.waitListId]) || 0;
-        if (existingId) return existingId;
-        const productRows = await call('crm.deal.productrows.get', { id: dealId }).catch(() => []);
-        const services = (Array.isArray(productRows) ? productRows : [])
-          .map(row => row.PRODUCT_NAME)
-          .filter(Boolean)
-          .join(', ');
-        const result = await call('booking.v1.waitlist.add', {
-          fields: { note: `${deal.TITLE || `Сделка #${dealId}`}\nУслуга: ${services || 'тип ухода уточняется'}\nНазначьте подопечного, сиделку и график.` }
-        });
-        const waitListId = Number(result?.id ?? result) || 0;
-        if (!waitListId) throw new Error('Не удалось получить ID листа ожидания');
-        await call('booking.v1.waitlist.externalData.set', {
-          waitListId,
-          externalData: [{ moduleId: 'crm', entityTypeId: 'DEAL', value: String(dealId) }]
-        });
-        await call('crm.deal.update', { id: dealId, fields: { [substitutionFields.waitListId]: waitListId } });
-        deal[substitutionFields.waitListId] = waitListId;
-        return waitListId;
-      }
-
-      async function syncRecipientToWaitlist(contact) {
-        const waitListId = await ensureWaitlist();
-        await call('booking.v1.waitlist.client.set', {
-          waitListId,
-          clients: [{ id: Number(contact.ID), type: { module: 'crm', code: 'CONTACT' } }]
-        });
-      }
-
       async function ensureCaregiverAvailability(resourceId) {
         await call('booking.v1.resource.slots.set', {
           resourceId,
@@ -314,7 +280,6 @@
         await ensureCaregiverAvailability(resourceId);
         await call('crm.deal.update', { id: dealId, fields: { [substitutionFields.resourceId]: resourceId } });
         deal[substitutionFields.resourceId] = resourceId;
-        await ensureWaitlist();
         return resourceId;
       }
 
@@ -443,10 +408,6 @@
         let automationNote = '';
         try {
           const contact = await getContact(id);
-          if (activeRole.field === 'UF_CRM_CARE_RECIPIENT') {
-            await syncRecipientToWaitlist(contact);
-            automationNote = ' Подопечный добавлен клиентом в лист ожидания.';
-          }
           if (activeRole.field === 'UF_CRM_CARE_EXECUTOR') {
             const resourceId = await ensureCaregiverResource(contact);
             automationNote = ` Ресурс сиделки создан или найден (ID ${resourceId}); доступность настроена 00:00–24:00.`;

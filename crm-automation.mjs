@@ -24,21 +24,3 @@ export function isSubstitutionActive(until, now = new Date()) {
     : new Date(until);
   return Number.isFinite(value.getTime()) && value.getTime() >= now.getTime();
 }
-
-export function careRequestLabel(lead) {
-  const calculation = lead?.calculation;
-  if (calculation && typeof calculation === 'object') {
-    return String(calculation.baseLabel || calculation.plan || '').trim() || 'Тип ухода уточняется';
-  }
-  return 'Тип ухода уточняется';
-}
-
-export function buildBookingWaitlistNote({ dealId, title, lead }) {
-  const lines = [
-    `Сделка #${Number(dealId) || 0}: ${String(title || '').trim() || 'Новая заявка на уход'}`,
-    `Услуга: ${careRequestLabel(lead)}`,
-    'Подопечный: назначается во вкладке «Участники сделки»',
-    'Сиделка и график: требуется назначение менеджером'
-  ];
-  return lines.join('\n').slice(0, 4000);
-}
