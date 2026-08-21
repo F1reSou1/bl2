@@ -53,6 +53,9 @@ test('server and deal widget contain required integration calls', async () => {
   assert.match(widget, /resourceWasCreated/);
   assert.match(widget, /resourceNeedsUpdate/);
   assert.match(widget, /retryFind/);
+  assert.match(widget, /canonicalName/);
+  assert.match(widget, /searchQuery: 'Сиделка'/);
+  assert.match(widget, /filter: \{ searchQuery: contactNumber \}/);
   assert.match(widget, /filter: \{ name: 'Сиделка' \}/);
   assert.match(widget, /isMain: 'Y'/);
   assert.match(widget, /Открыть Онлайн-запись/);

@@ -255,6 +255,11 @@
         const resourceName = `Сиделка-${contactNumber} — ${caregiverName}`;
         const contactMarker = `контакт C_${contact.ID}`;
         const resourceDescription = `Сиделка из CRM, ${contactMarker}`;
+        const canonicalName = value => String(value || '')
+          .normalize('NFKC')
+          .trim()
+          .replace(/\s+/g, ' ')
+          .toLocaleLowerCase('ru-RU');
         const wait = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
         const retryFind = async finder => {
           for (const pause of [0, 150, 350, 700]) {
@@ -273,7 +278,18 @@
             order: { id: 'ASC' }
           });
           const resources = Array.isArray(listed) ? listed : (listed?.resource || []);
-          return resources.find(item => item.name === name);
+          const exact = resources.find(item => canonicalName(item.name) === canonicalName(name));
+          if (exact) return exact;
+
+          // Exact filtering in Booking can miss a resource immediately after
+          // creation or when Unicode punctuation differs. Search by the CRM
+          // contact number and compare normalized names locally.
+          const searched = await call('booking.v1.resource.list', {
+            filter: { searchQuery: contactNumber },
+            order: { id: 'ASC' }
+          });
+          const searchedResources = Array.isArray(searched) ? searched : (searched?.resource || []);
+          return searchedResources.find(item => canonicalName(item.name) === canonicalName(name));
         };
         const findCaregiverResource = async typeId => {
           const numbered = await findResourceByName(resourceName);
@@ -303,7 +319,20 @@
             order: { id: 'ASC' }
           });
           const namedTypes = Array.isArray(byName) ? byName : (byName?.resource || []);
-          return namedTypes.find(item => item.name === 'Сиделка');
+          const namedType = namedTypes.find(item => canonicalName(item.name) === canonicalName('Сиделка'));
+          if (namedType) return namedType;
+
+          // Manually created types often have a generated internal code and
+          // can be missed by exact filtering. The visible name remains the
+          // reliable key for this portal.
+          const bySearch = await call('booking.v1.resourceType.list', {
+            filter: { searchQuery: 'Сиделка' },
+            order: { id: 'ASC' }
+          });
+          const searchedTypes = Array.isArray(bySearch) ? bySearch : (bySearch?.resource || []);
+          return searchedTypes.find(item => canonicalName(item.name) === canonicalName('Сиделка'))
+            || searchedTypes[0]
+            || null;
         };
 
         let type = await findCaregiverType();
