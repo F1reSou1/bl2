@@ -268,35 +268,34 @@
 
       async function ensureCaregiverResource(contact) {
         const name = fullName(contact);
-        const typesResult = await call('booking.v1.resourceType.list', { filter: {}, order: { id: 'ASC' } });
-        // Both list methods return their collection in `result.resource`.
-        // Do not fall back to an empty array here: that made the application try
-        // to create a type/resource which already existed.
-        const types = Array.isArray(typesResult) ? typesResult : (typesResult?.resource || []);
-        let type = types.find(item => item.code === 'caregiver' || item.name === 'Сиделка');
-        if (!type) {
-          const created = await call('booking.v1.resourceType.add', {
-            fields: {
-              name: 'Сиделка', code: 'caregiver',
-              isInfoNotificationOn: 'N', isConfirmationNotificationOn: 'N',
-              isReminderNotificationOn: 'N', isFeedbackNotificationOn: 'N', isDelayedNotificationOn: 'N',
-              templateTypeInfo: 'animate', templateTypeConfirmation: 'animate',
-              templateTypeReminder: 'base', templateTypeFeedback: 'animate', templateTypeDelayed: 'animate',
-              infoDelay: 300, reminderDelay: -1, delayedDelay: 300, delayedCounterDelay: 7200,
-              confirmationDelay: 86400, confirmationRepetitions: 0,
-              confirmationRepetitionsInterval: 0, confirmationCounterDelay: 7200
-            }
-          });
-          type = { id: Number(created?.id ?? created) };
-        }
-        const typeId = Number(type.id ?? type.ID);
-        const listed = await call('booking.v1.resource.list', {
-          filter: { searchQuery: name, typeId, isMain: 'Y' },
+        // Resource names are unique across Online Booking, not only within a
+        // type. Reuse a resource created manually in Online Booking too.
+        const existingListed = await call('booking.v1.resource.list', {
+          filter: { name },
           order: { id: 'ASC' }
         });
-        const resources = Array.isArray(listed) ? listed : (listed?.resource || []);
-        let resource = resources.find(item => item.name === name && Number(item.typeId) === typeId);
+        const existingResources = Array.isArray(existingListed) ? existingListed : (existingListed?.resource || []);
+        let resource = existingResources.find(item => item.name === name);
         if (!resource) {
+          const typesResult = await call('booking.v1.resourceType.list', { filter: { code: 'caregiver' }, order: { id: 'ASC' } });
+          const types = Array.isArray(typesResult) ? typesResult : (typesResult?.resource || []);
+          let type = types.find(item => item.code === 'caregiver');
+          if (!type) {
+            const created = await call('booking.v1.resourceType.add', {
+              fields: {
+                name: 'Сиделка', code: 'caregiver',
+                isInfoNotificationOn: 'N', isConfirmationNotificationOn: 'N',
+                isReminderNotificationOn: 'N', isFeedbackNotificationOn: 'N', isDelayedNotificationOn: 'N',
+                templateTypeInfo: 'animate', templateTypeConfirmation: 'animate',
+                templateTypeReminder: 'base', templateTypeFeedback: 'animate', templateTypeDelayed: 'animate',
+                infoDelay: 300, reminderDelay: -1, delayedDelay: 300, delayedCounterDelay: 7200,
+                confirmationDelay: 86400, confirmationRepetitions: 0,
+                confirmationRepetitionsInterval: 0, confirmationCounterDelay: 7200
+              }
+            });
+            type = { id: Number(created?.id ?? created) };
+          }
+          const typeId = Number(type.id ?? type.ID);
           const created = await call('booking.v1.resource.add', {
             fields: {
               name,
