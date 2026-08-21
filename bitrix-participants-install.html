@@ -16,7 +16,7 @@
 <body>
   <main>
     <h1>Участники сделки</h1>
-    <p>Добавляю вкладку для заказчика, подопечного и исполнителя, а также нужные поля сделки.</p>
+    <p>Добавляю вкладку для участников, замещения и связи с Онлайн-записью, а также нужные поля сделки.</p>
     <div id="status" class="status">Подключаю приложение…</div>
   </main>
 
@@ -26,8 +26,14 @@
       const status = document.getElementById('status');
       const widgetUrl = `${location.origin}/api/bitrix/participants/widget`;
       const fieldsToCreate = [
-        { code: 'CARE_RECIPIENT', xmlId: 'bl_care_recipient', label: 'Подопечный' },
-        { code: 'CARE_EXECUTOR', xmlId: 'bl_care_executor', label: 'Сиделка / исполнитель' }
+        { code: 'CARE_RECIPIENT', xmlId: 'bl_care_recipient', label: 'Подопечный', type: 'crm', sort: 310, settings: { CONTACT: 'Y' } },
+        { code: 'CARE_EXECUTOR', xmlId: 'bl_care_executor', label: 'Сиделка / исполнитель', type: 'crm', sort: 320, settings: { CONTACT: 'Y' } },
+        { code: 'SUBSTITUTION_ORIGINAL', xmlId: 'bl_substitution_original', label: 'Исходный ответственный до замещения', type: 'employee', sort: 330 },
+        { code: 'SUBSTITUTION_MANAGER', xmlId: 'bl_substitution_manager', label: 'Замещающий менеджер', type: 'employee', sort: 340 },
+        { code: 'SUBSTITUTION_UNTIL', xmlId: 'bl_substitution_until', label: 'Замещение до', type: 'date', sort: 350 },
+        { code: 'SUBSTITUTION_COMMENT', xmlId: 'bl_substitution_comment', label: 'Комментарий к замещению', type: 'string', sort: 360, settings: { ROWS: 3 } },
+        { code: 'BOOKING_WAITLIST_ID', xmlId: 'bl_booking_waitlist_id', label: 'ID листа ожидания Онлайн-записи', type: 'integer', sort: 370 },
+        { code: 'CARE_RESOURCE_ID', xmlId: 'bl_care_resource_id', label: 'ID ресурса сиделки', type: 'integer', sort: 380 }
       ];
 
       function setStatus(message, isError) {
@@ -64,9 +70,9 @@
               FIELD_NAME: field.code,
               XML_ID: field.xmlId,
               LABEL: field.label,
-              USER_TYPE_ID: 'crm',
-              SORT: field.code === 'CARE_RECIPIENT' ? 310 : 320,
-              SETTINGS: { CONTACT: 'Y' }
+              USER_TYPE_ID: field.type,
+              SORT: field.sort,
+              SETTINGS: field.settings || {}
             }
           });
         }

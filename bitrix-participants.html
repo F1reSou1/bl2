@@ -11,6 +11,9 @@
     main { max-width: 940px; margin: 0 auto; padding: 24px; }
     h1 { margin: 0; font-size: 23px; color: #0a7164; }
     .hint { margin: 6px 0 20px; color: #60707d; }
+    .deal-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin: 0 0 18px; padding: 13px 15px; border: 1px solid #d7e8e2; border-radius: 12px; background: #fff; }
+    .deal-actions strong { display: block; color: #0a7164; }
+    .deal-actions small { color: #61717b; }
     .roles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
     .role { min-height: 164px; padding: 16px; border: 1px solid #d7e8e2; border-radius: 14px; background: #fff; box-shadow: 0 4px 16px rgba(10, 113, 100, .05); }
     .role h2 { margin: 0 0 8px; font-size: 17px; }
@@ -28,7 +31,8 @@
     .dialog h2 { margin: 0 0 4px; }
     .dialog p { margin: 0 0 16px; color: #667784; }
     label { display: block; margin: 12px 0 5px; font-weight: 600; }
-    input { width: 100%; padding: 10px 11px; border: 1px solid #c7d6d2; border-radius: 8px; font: inherit; }
+    input, select, textarea { width: 100%; padding: 10px 11px; border: 1px solid #c7d6d2; border-radius: 8px; background: #fff; font: inherit; }
+    textarea { min-height: 92px; resize: vertical; }
     .check { display: flex; gap: 8px; align-items: flex-start; margin-top: 12px; color: #50606d; }
     .check input { width: auto; margin-top: 4px; }
     .search-results { margin-top: 12px; max-height: 160px; overflow: auto; }
@@ -42,6 +46,10 @@
   <main>
     <h1>Участники сделки</h1>
     <p class="hint">Заказчик хранится в стандартном контакте сделки. Подопечный и исполнитель — в отдельных полях сделки.</p>
+    <section class="deal-actions">
+      <div><strong>Ответственный: <span id="responsible-name">загружается…</span></strong><small id="substitution-state">Замещение не задано</small></div>
+      <button type="button" id="transfer-button">Передать клиента</button>
+    </section>
     <section class="roles" id="roles"></section>
     <div id="status" class="status">Загружаю данные сделки…</div>
   </main>
@@ -69,6 +77,23 @@
     </form>
   </dialog>
 
+  <dialog id="transfer-dialog">
+    <form class="dialog" method="dialog" id="transfer-form">
+      <h2>Передать клиента</h2>
+      <p>Новый ответственный получит сделку до выбранной даты. На этот период текущий менеджер исключается из очереди новых заявок.</p>
+      <label for="transfer-manager">Кому передаю</label>
+      <select id="transfer-manager" required></select>
+      <label for="transfer-until">На какой срок</label>
+      <input id="transfer-until" type="date" required>
+      <label for="transfer-comment">Комментарий</label>
+      <textarea id="transfer-comment" maxlength="2000" required placeholder="Причина и важные договорённости по клиенту"></textarea>
+      <div class="dialog-actions">
+        <button type="button" class="secondary" id="transfer-cancel">Отмена</button>
+        <button type="submit" id="transfer-submit">Передать</button>
+      </div>
+    </form>
+  </dialog>
+
   <script src="https://unpkg.com/@bitrix24/b24jssdk@1/dist/umd/index.min.js"></script>
   <script>
     (async () => {
@@ -86,12 +111,26 @@
       const addressInput = document.getElementById('person-address');
       const searchResults = document.getElementById('search-results');
       const changeType = document.getElementById('change-type');
+      const transferDialog = document.getElementById('transfer-dialog');
+      const transferForm = document.getElementById('transfer-form');
+      const transferManager = document.getElementById('transfer-manager');
+      const transferUntil = document.getElementById('transfer-until');
+      const transferComment = document.getElementById('transfer-comment');
+      const substitutionFields = {
+        original: 'UF_CRM_SUBSTITUTION_ORIGINAL',
+        replacement: 'UF_CRM_SUBSTITUTION_MANAGER',
+        until: 'UF_CRM_SUBSTITUTION_UNTIL',
+        comment: 'UF_CRM_SUBSTITUTION_COMMENT',
+        waitListId: 'UF_CRM_BOOKING_WAITLIST_ID',
+        resourceId: 'UF_CRM_CARE_RESOURCE_ID'
+      };
       let b24;
       let dealId;
       let deal;
       let activeRole;
       let activeContact;
       let contactsByRole = {};
+      let employees = [];
 
       function setStatus(message, isError) {
         status.textContent = message;
@@ -136,9 +175,112 @@
         sessionStorage.setItem(titleVersion, '1');
       }
 
+      async function loadEmployees() {
+        const users = await call('user.get', {});
+        employees = (Array.isArray(users) ? users : [])
+          .filter(user => user?.ACTIVE !== false && user?.ACTIVE !== 'N')
+          .sort((left, right) => employeeName(left).localeCompare(employeeName(right), 'ru'));
+      }
+
+      function renderResponsible() {
+        const currentId = userId(deal?.ASSIGNED_BY_ID);
+        const current = employees.find(user => Number(user.ID) === currentId);
+        document.getElementById('responsible-name').textContent = current ? employeeName(current) : `Сотрудник #${currentId || '—'}`;
+        const originalId = userId(deal?.[substitutionFields.original]);
+        const replacementId = userId(deal?.[substitutionFields.replacement]);
+        const until = deal?.[substitutionFields.until];
+        const state = document.getElementById('substitution-state');
+        if (originalId && replacementId && until) {
+          const original = employees.find(user => Number(user.ID) === originalId);
+          const replacement = employees.find(user => Number(user.ID) === replacementId);
+          state.textContent = `Замещение: ${original ? employeeName(original) : `#${originalId}`} → ${replacement ? employeeName(replacement) : `#${replacementId}`}, до ${String(until).slice(0, 10)}`;
+        } else {
+          state.textContent = 'Замещение не задано';
+        }
+      }
+
+      async function ensureWaitlist() {
+        const existingId = Number(deal?.[substitutionFields.waitListId]) || 0;
+        if (existingId) return existingId;
+        const productRows = await call('crm.deal.productrows.get', { id: dealId }).catch(() => []);
+        const services = (Array.isArray(productRows) ? productRows : [])
+          .map(row => row.PRODUCT_NAME)
+          .filter(Boolean)
+          .join(', ');
+        const result = await call('booking.v1.waitlist.add', {
+          fields: { note: `${deal.TITLE || `Сделка #${dealId}`}\nУслуга: ${services || 'тип ухода уточняется'}\nНазначьте подопечного, сиделку и график.` }
+        });
+        const waitListId = Number(result?.id ?? result) || 0;
+        if (!waitListId) throw new Error('Не удалось получить ID листа ожидания');
+        await call('booking.v1.waitlist.externalData.set', {
+          waitListId,
+          externalData: [{ moduleId: 'crm', entityTypeId: 'DEAL', value: String(dealId) }]
+        });
+        await call('crm.deal.update', { id: dealId, fields: { [substitutionFields.waitListId]: waitListId } });
+        deal[substitutionFields.waitListId] = waitListId;
+        return waitListId;
+      }
+
+      async function syncRecipientToWaitlist(contact) {
+        const waitListId = await ensureWaitlist();
+        await call('booking.v1.waitlist.client.set', {
+          waitListId,
+          clients: [{ id: Number(contact.ID), type: { module: 'crm', code: 'CONTACT' } }]
+        });
+      }
+
+      async function ensureCaregiverResource(contact) {
+        const name = fullName(contact);
+        const typesResult = await call('booking.v1.resourceType.list', { filter: {}, order: { id: 'ASC' } });
+        const types = Array.isArray(typesResult) ? typesResult : (typesResult?.resourceTypes || typesResult?.items || []);
+        let type = types.find(item => item.code === 'caregiver' || item.name === 'Сиделка');
+        if (!type) {
+          const created = await call('booking.v1.resourceType.add', {
+            fields: {
+              name: 'Сиделка', code: 'caregiver',
+              isInfoNotificationOn: 'N', isConfirmationNotificationOn: 'N',
+              isReminderNotificationOn: 'N', isFeedbackNotificationOn: 'N', isDelayedNotificationOn: 'N'
+            }
+          });
+          type = { id: Number(created?.id ?? created) };
+        }
+        const typeId = Number(type.id ?? type.ID);
+        const listed = await call('booking.v1.resource.list', { filter: { name }, order: { id: 'ASC' } });
+        const resources = Array.isArray(listed) ? listed : (listed?.resources || listed?.items || []);
+        let resource = resources.find(item => item.name === name && Number(item.typeId) === typeId);
+        if (!resource) {
+          const created = await call('booking.v1.resource.add', {
+            fields: {
+              name,
+              description: `Сиделка из CRM, контакт C_${contact.ID}`,
+              typeId,
+              isMain: 'Y',
+              isInfoNotificationOn: 'N', isConfirmationNotificationOn: 'N',
+              isReminderNotificationOn: 'N', isFeedbackNotificationOn: 'N', isDelayedNotificationOn: 'N',
+              templateTypeInfo: 'animate', templateTypeConfirmation: 'animate', templateTypeFeedback: 'animate', templateTypeDelayed: 'animate'
+            }
+          });
+          resource = { id: Number(created?.id ?? created) };
+        }
+        const resourceId = Number(resource.id ?? resource.ID);
+        await call('crm.deal.update', { id: dealId, fields: { [substitutionFields.resourceId]: resourceId } });
+        deal[substitutionFields.resourceId] = resourceId;
+        await ensureWaitlist();
+        return resourceId;
+      }
+
       function contactId(value) {
         const match = String(value || '').match(/(?:C_)?(\d+)/);
         return match ? Number(match[1]) : 0;
+      }
+
+      function userId(value) {
+        const match = String(value || '').match(/\d+/);
+        return match ? Number(match[0]) : 0;
+      }
+
+      function employeeName(user) {
+        return [user?.NAME, user?.LAST_NAME].filter(Boolean).join(' ') || `Сотрудник #${user?.ID || '—'}`;
       }
 
       async function getContact(value) {
@@ -171,6 +313,7 @@
 
       async function refresh() {
         deal = await call('crm.deal.get', { id: dealId });
+        renderResponsible();
         const contactBindings = await call('crm.deal.contact.items.get', { id: dealId });
         const primaryContact = (Array.isArray(contactBindings) ? contactBindings : [])
           .find(binding => binding.IS_PRIMARY === 'Y')
@@ -248,11 +391,73 @@
         if (activeRole.field) await call('crm.deal.update', { id: dealId, fields: { [activeRole.field]: `C_${id}` } });
         else await syncDealContact(id, true);
         dialog.close();
-        setStatus(`${activeRole.title}: контакт назначен.`);
+        let automationNote = '';
+        try {
+          const contact = await getContact(id);
+          if (activeRole.field === 'UF_CRM_CARE_RECIPIENT') {
+            await syncRecipientToWaitlist(contact);
+            automationNote = ' Подопечный добавлен клиентом в лист ожидания.';
+          }
+          if (activeRole.field === 'UF_CRM_CARE_EXECUTOR') {
+            const resourceId = await ensureCaregiverResource(contact);
+            automationNote = ` Ресурс сиделки создан или найден (ID ${resourceId}).`;
+          }
+        } catch (error) {
+          automationNote = ` Онлайн-запись пока не синхронизирована: ${error.message}`;
+        }
+        setStatus(`${activeRole.title}: контакт назначен.${automationNote}`, automationNote.includes('не синхронизирована'));
         await refresh();
       }
 
       document.getElementById('cancel-button').addEventListener('click', () => dialog.close());
+      document.getElementById('transfer-cancel').addEventListener('click', () => transferDialog.close());
+      document.getElementById('transfer-button').addEventListener('click', () => {
+        const currentId = userId(deal?.ASSIGNED_BY_ID);
+        transferManager.innerHTML = '<option value="">Выберите менеджера</option>' + employees
+          .filter(user => Number(user.ID) !== currentId)
+          .map(user => `<option value="${Number(user.ID)}">${escapeHtml(employeeName(user))}</option>`)
+          .join('');
+        const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000);
+        transferUntil.min = new Date().toISOString().slice(0, 10);
+        transferUntil.value = tomorrow.toISOString().slice(0, 10);
+        transferComment.value = '';
+        transferDialog.showModal();
+      });
+      transferForm.addEventListener('submit', async event => {
+        event.preventDefault();
+        const originalId = userId(deal?.ASSIGNED_BY_ID);
+        const replacementId = Number(transferManager.value);
+        const until = transferUntil.value;
+        const comment = transferComment.value.trim();
+        if (!originalId || !replacementId || !until || !comment) return setStatus('Заполните менеджера, срок и комментарий.', true);
+        const submit = document.getElementById('transfer-submit');
+        submit.disabled = true;
+        try {
+          const original = employees.find(user => Number(user.ID) === originalId);
+          const replacement = employees.find(user => Number(user.ID) === replacementId);
+          await call('crm.deal.update', {
+            id: dealId,
+            fields: {
+              ASSIGNED_BY_ID: replacementId,
+              [substitutionFields.original]: originalId,
+              [substitutionFields.replacement]: replacementId,
+              [substitutionFields.until]: until,
+              [substitutionFields.comment]: comment
+            }
+          });
+          await call('crm.timeline.comment.add', {
+            fields: {
+              ENTITY_ID: dealId,
+              ENTITY_TYPE: 'deal',
+              COMMENT: `Передача клиента на время отсутствия.\nОт: ${employeeName(original)}\nКому: ${employeeName(replacement)}\nСрок: до ${until}\nКомментарий: ${comment}`
+            }
+          });
+          transferDialog.close();
+          await refresh();
+          setStatus('Клиент передан. Событие записано в таймлайне сделки.');
+        } catch (error) { showError(error); }
+        finally { submit.disabled = false; }
+      });
       document.getElementById('search-button').addEventListener('click', async () => {
         const query = nameInput.value.trim();
         if (query.length < 2) return setStatus('Введите хотя бы две буквы имени для поиска.', true);
@@ -303,6 +508,7 @@
         await ensurePlacementTitle().catch(error => console.warn('Не удалось обновить название вкладки:', error));
         dealId = Number(b24.placement?.options?.ID || 0);
         if (!Number.isInteger(dealId) || dealId <= 0) throw new Error('Не удалось определить сделку. Откройте вкладку из карточки сделки.');
+        await loadEmployees();
         await refresh();
         setStatus('Готово. Выберите роль, затем контакт или создание нового контакта.');
       } catch (error) { showError(error); }
