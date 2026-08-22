@@ -25,9 +25,13 @@
     button:disabled { cursor: wait; opacity: .65; }
     .status { margin-top: 16px; padding: 11px 13px; border-radius: 9px; background: #edf8f4; color: #075c52; }
     .status.error { background: #fff0f0; color: #a22d2d; }
-    .booking-guide { margin-top: 16px; padding: 16px; border: 1px solid #d7e8e2; border-radius: 14px; background: #fff; }
-    .booking-guide h2 { margin: 0 0 6px; font-size: 17px; }
-    .booking-guide p { margin: 0 0 12px; color: #61717b; }
+    .booking-create, .booking-guide { margin-top: 16px; padding: 16px; border: 1px solid #d7e8e2; border-radius: 14px; background: #fff; }
+    .booking-create h2, .booking-guide h2 { margin: 0 0 6px; font-size: 17px; }
+    .booking-create p, .booking-guide p { margin: 0 0 12px; color: #61717b; }
+    .booking-create-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 12px; }
+    .booking-create-grid .full { grid-column: 1 / -1; }
+    .booking-target { min-height: 20px; margin: 4px 0 12px; color: #075c52; font-weight: 600; }
+    .booking-actions { display: flex; justify-content: flex-end; margin-top: 16px; }
     dialog { width: min(540px, calc(100% - 28px)); padding: 0; border: 0; border-radius: 16px; box-shadow: 0 20px 65px rgba(22, 35, 47, .28); }
     dialog::backdrop { background: rgba(19, 39, 48, .4); }
     .dialog { padding: 22px; }
@@ -42,7 +46,7 @@
     .result { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 9px 0; border-top: 1px solid #edf1f0; }
     .result small { display: block; color: #75838d; }
     .dialog-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 20px; }
-    @media (max-width: 700px) { .roles { grid-template-columns: 1fr; } }
+    @media (max-width: 700px) { .roles, .booking-create-grid { grid-template-columns: 1fr; } .booking-create-grid .full { grid-column: auto; } }
   </style>
 </head>
 <body>
@@ -55,9 +59,31 @@
     </section>
     <section class="roles" id="roles"></section>
     <div id="status" class="status">Загружаю данные сделки…</div>
+    <section class="booking-create">
+      <h2>Создать запись</h2>
+      <p>Запись будет создана для подопечного из сделки и попадёт в график назначенной сиделки.</p>
+      <form id="booking-form">
+        <div class="booking-create-grid">
+          <div class="full">
+            <label for="booking-name">Название</label>
+            <input id="booking-name" maxlength="255" required placeholder="Например, уход на дому">
+          </div>
+          <div>
+            <label for="booking-from">С</label>
+            <input id="booking-from" type="datetime-local" required>
+          </div>
+          <div>
+            <label for="booking-to">До</label>
+            <input id="booking-to" type="datetime-local" required>
+          </div>
+        </div>
+        <div id="booking-target" class="booking-target">Подопечный и сиделка загружаются…</div>
+        <div class="booking-actions"><button type="submit" id="create-booking-button">Создать запись</button></div>
+      </form>
+    </section>
     <section class="booking-guide">
       <h2>График в Онлайн-записи</h2>
-      <p>Нажмите время в колонке сиделки и выберите подопечного как клиента CRM. Внешняя страница находит график по контакту подопечного.</p>
+      <p>Созданные записи также видны в Онлайн-записи. Внешняя страница находит график по контакту подопечного.</p>
       <button type="button" class="secondary" id="open-booking-button">Открыть Онлайн-запись</button>
     </section>
   </main>
@@ -124,6 +150,12 @@
       const transferManager = document.getElementById('transfer-manager');
       const transferUntil = document.getElementById('transfer-until');
       const transferComment = document.getElementById('transfer-comment');
+      const bookingForm = document.getElementById('booking-form');
+      const bookingName = document.getElementById('booking-name');
+      const bookingFrom = document.getElementById('booking-from');
+      const bookingTo = document.getElementById('booking-to');
+      const bookingTarget = document.getElementById('booking-target');
+      const createBookingButton = document.getElementById('create-booking-button');
       const substitutionFields = {
         original: 'UF_CRM_SUBSTITUTION_ORIGINAL',
         replacement: 'UF_CRM_SUBSTITUTION_MANAGER',
@@ -252,7 +284,9 @@
       async function ensureCaregiverResource(contact) {
         const caregiverName = fullName(contact);
         const contactNumber = String(Number(contact.ID)).padStart(4, '0');
-        const resourceName = `Сиделка-${contactNumber} — ${caregiverName}`;
+        const resourceName = `${caregiverName} - ${contactNumber}`;
+        const legacyNumberedResourceName = `Сиделка-${contactNumber} — ${caregiverName}`;
+        const legacyManagerResourceName = `${caregiverName} - Сиделка ${contactNumber}`;
         const contactMarker = `контакт C_${contact.ID}`;
         const resourceDescription = `Сиделка из CRM, ${contactMarker}`;
         const canonicalName = value => String(value || '')
@@ -313,7 +347,9 @@
         const findCaregiverResource = async typeId => {
           const numbered = await findResourceByName(resourceName);
           if (numbered) return numbered;
-          const legacy = await findResourceByName(caregiverName);
+          const legacy = await findResourceByName(legacyNumberedResourceName)
+            || await findResourceByName(legacyManagerResourceName)
+            || await findResourceByName(caregiverName);
           if (!legacy) return null;
           const description = String(itemDescription(legacy) || '');
           const belongsToAnotherContact = /контакт C_\d+/.test(description) && !description.includes(contactMarker);
@@ -468,6 +504,49 @@
         return Array.isArray(contact?.PHONE) ? contact.PHONE[0]?.VALUE || '' : '';
       }
 
+      function bookingTimestamp(value, timezone = 'Asia/Vladivostok') {
+        const match = String(value || '').match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/);
+        if (!match) return 0;
+        const [, year, month, day, hour, minute] = match.map(Number);
+        const utcGuess = Date.UTC(year, month - 1, day, hour, minute);
+        const parts = new Intl.DateTimeFormat('en-CA', {
+          timeZone: timezone,
+          year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23'
+        }).formatToParts(new Date(utcGuess));
+        const values = Object.fromEntries(parts.filter(part => part.type !== 'literal').map(part => [part.type, Number(part.value)]));
+        const displayedAsUtc = Date.UTC(values.year, values.month - 1, values.day, values.hour, values.minute);
+        return Math.floor((utcGuess - (displayedAsUtc - utcGuess)) / 1000);
+      }
+
+      function datetimeLocalValue(date) {
+        const pad = value => String(value).padStart(2, '0');
+        return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+      }
+
+      function setBookingDefaults() {
+        if (bookingFrom.value || bookingTo.value) return;
+        const start = new Date();
+        start.setSeconds(0, 0);
+        start.setMinutes(Math.ceil(start.getMinutes() / 30) * 30);
+        if (start.getMinutes() === 60) start.setHours(start.getHours() + 1, 0, 0, 0);
+        const end = new Date(start.getTime() + 60 * 60 * 1000);
+        bookingFrom.value = datetimeLocalValue(start);
+        bookingTo.value = datetimeLocalValue(end);
+      }
+
+      function renderBookingTarget() {
+        const recipient = contactsByRole.recipient;
+        const executor = contactsByRole.executor;
+        if (!recipient || !executor) {
+          bookingTarget.textContent = 'Укажите в сделке подопечного и сиделку, чтобы создать запись.';
+          createBookingButton.disabled = true;
+          return;
+        }
+        bookingTarget.textContent = `Подопечный: ${fullName(recipient)} · сиделка: ${fullName(executor)}`;
+        createBookingButton.disabled = false;
+        setBookingDefaults();
+      }
+
       function escapeHtml(value) {
         return String(value || '').replace(/[&<>'"]/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[character]);
       }
@@ -500,6 +579,7 @@
         for (const [key, value] of Object.entries(values)) contacts[key] = await getContact(value);
         contactsByRole = contacts;
         render(contacts);
+        renderBookingTarget();
       }
 
       function openDialog(roleKey) {
@@ -559,6 +639,51 @@
       document.getElementById('open-booking-button').addEventListener('click', () => {
         const domain = new URLSearchParams(location.search).get('DOMAIN');
         if (domain) window.open(`https://${domain}/booking/`, '_blank');
+      });
+
+      bookingForm.addEventListener('submit', async event => {
+        event.preventDefault();
+        const name = bookingName.value.trim();
+        const recipient = contactsByRole.recipient;
+        const executor = contactsByRole.executor;
+        const timezone = 'Asia/Vladivostok';
+        const fromTimestamp = bookingTimestamp(bookingFrom.value, timezone);
+        const toTimestamp = bookingTimestamp(bookingTo.value, timezone);
+        if (!recipient || !executor) return setStatus('Ошибка: назначьте подопечного и сиделку.', true);
+        if (!name) return setStatus('Ошибка: укажите название записи.', true);
+        if (!fromTimestamp || !toTimestamp || toTimestamp <= fromTimestamp) return setStatus('Ошибка: время окончания должно быть позже начала.', true);
+        createBookingButton.disabled = true;
+        try {
+          // Always ensure the resource before booking. This also renames an
+          // older resource to the current "ФИО - 0000" format.
+          const resourceId = await ensureCaregiverResource(executor);
+          const created = await call('booking.v1.booking.add', {
+            fields: {
+              name,
+              resourceIds: [resourceId],
+              datePeriod: {
+                from: { timestamp: fromTimestamp, timezone },
+                to: { timestamp: toTimestamp, timezone }
+              }
+            }
+          });
+          const bookingId = Number(created?.id ?? created?.booking?.id ?? created);
+          if (!bookingId) throw new Error('booking id is missing');
+          await call('booking.v1.booking.client.set', {
+            bookingId,
+            clients: [{ id: Number(recipient.ID), type: { module: 'crm', code: 'CONTACT' } }]
+          });
+          await call('booking.v1.booking.externalData.set', {
+            bookingId,
+            externalData: [{ moduleId: 'crm', entityTypeId: 'DEAL', value: String(dealId) }]
+          });
+          setStatus(`Готово: создана запись #${bookingId} для ${fullName(recipient)}.`);
+          bookingName.value = '';
+          bookingFrom.value = '';
+          bookingTo.value = '';
+          setBookingDefaults();
+        } catch (error) { showError(error); }
+        finally { renderBookingTarget(); }
       });
 
       async function assignContact(id, updateType) {
