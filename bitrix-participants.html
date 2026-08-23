@@ -32,6 +32,18 @@
     .booking-create-grid .full { grid-column: 1 / -1; }
     .booking-target { min-height: 20px; margin: 4px 0 12px; color: #075c52; font-weight: 600; }
     .booking-actions { display: flex; justify-content: flex-end; margin-top: 16px; }
+    .booking-schedule { margin-top: 16px; padding: 16px; border: 1px solid #d7e8e2; border-radius: 14px; background: #fff; }
+    .booking-schedule-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+    .booking-schedule h2 { margin: 0; font-size: 17px; }
+    .booking-schedule-note { margin: 0 0 8px; color: #61717b; font-size: 13px; }
+    .schedule-day { margin-top: 14px; }
+    .schedule-day:first-child { margin-top: 0; }
+    .schedule-day h3 { margin: 0; padding-bottom: 7px; border-bottom: 1px solid #e5eeeb; color: #61717b; font-size: 13px; text-transform: capitalize; }
+    .schedule-item { display: grid; grid-template-columns: 104px minmax(0, 1fr); gap: 12px; padding: 10px 0; border-bottom: 1px solid #edf3f1; }
+    .schedule-item-time { color: #087465; font-weight: 700; white-space: nowrap; }
+    .schedule-item-name { font-weight: 600; }
+    .schedule-empty { margin: 0; padding: 10px 0; color: #61717b; }
+    .schedule-footer { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 14px; }
     dialog { width: min(540px, calc(100% - 28px)); padding: 0; border: 0; border-radius: 16px; box-shadow: 0 20px 65px rgba(22, 35, 47, .28); }
     dialog::backdrop { background: rgba(19, 39, 48, .4); }
     .dialog { padding: 22px; }
@@ -81,10 +93,11 @@
         <div class="booking-actions"><button type="submit" id="create-booking-button">Создать запись</button></div>
       </form>
     </section>
-    <section class="booking-guide">
-      <h2>График в Онлайн-записи</h2>
-      <p>Созданные записи также видны в Онлайн-записи. Внешняя страница находит график по контакту подопечного.</p>
-      <button type="button" class="secondary" id="open-booking-button">Открыть Онлайн-запись</button>
+    <section class="booking-schedule">
+      <div class="booking-schedule-header"><h2>Расписание</h2><button type="button" class="secondary" id="refresh-schedule-button">Обновить</button></div>
+      <p class="booking-schedule-note">Ближайшие 60 дней для подопечного и назначенной сиделки. Список находит график по контакту подопечного.</p>
+      <div id="booking-schedule" aria-live="polite">Загружаю расписание…</div>
+      <div class="schedule-footer"><button type="button" class="secondary" id="open-booking-button">Открыть Онлайн-запись</button></div>
     </section>
   </main>
 
@@ -156,6 +169,8 @@
       const bookingTo = document.getElementById('booking-to');
       const bookingTarget = document.getElementById('booking-target');
       const createBookingButton = document.getElementById('create-booking-button');
+      const scheduleNode = document.getElementById('booking-schedule');
+      const refreshScheduleButton = document.getElementById('refresh-schedule-button');
       const substitutionFields = {
         original: 'UF_CRM_SUBSTITUTION_ORIGINAL',
         replacement: 'UF_CRM_SUBSTITUTION_MANAGER',
@@ -547,6 +562,98 @@
         setBookingDefaults();
       }
 
+      function bookingDateParts(timestamp, timezone = 'Asia/Vladivostok') {
+        const parts = new Intl.DateTimeFormat('en-CA', {
+          timeZone: timezone,
+          year: 'numeric', month: '2-digit', day: '2-digit'
+        }).formatToParts(new Date(Number(timestamp) * 1000));
+        return Object.fromEntries(parts.filter(part => part.type !== 'literal').map(part => [part.type, part.value]));
+      }
+
+      function bookingDayKey(timestamp, timezone) {
+        const parts = bookingDateParts(timestamp, timezone);
+        return `${parts.year}-${parts.month}-${parts.day}`;
+      }
+
+      function formatBookingDay(timestamp, timezone) {
+        return new Intl.DateTimeFormat('ru-RU', {
+          timeZone: timezone, weekday: 'long', day: 'numeric', month: 'long'
+        }).format(new Date(Number(timestamp) * 1000));
+      }
+
+      function formatBookingTime(timestamp, timezone) {
+        return new Intl.DateTimeFormat('ru-RU', {
+          timeZone: timezone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23'
+        }).format(new Date(Number(timestamp) * 1000));
+      }
+
+      function scheduleBookings(result) {
+        if (Array.isArray(result)) return result;
+        return Array.isArray(result?.booking) ? result.booking : [];
+      }
+
+      function renderSchedule(bookings, message = '') {
+        if (message) {
+          scheduleNode.innerHTML = `<p class="schedule-empty">${escapeHtml(message)}</p>`;
+          return;
+        }
+        if (!bookings.length) {
+          scheduleNode.innerHTML = '<p class="schedule-empty">На ближайшие 60 дней записей нет.</p>';
+          return;
+        }
+        const groups = new Map();
+        for (const booking of bookings) {
+          const from = booking?.datePeriod?.from || {};
+          const timezone = from.timezone || booking?.datePeriod?.to?.timezone || 'Asia/Vladivostok';
+          const timestamp = Number(from.timestamp);
+          const key = bookingDayKey(timestamp, timezone);
+          if (!groups.has(key)) groups.set(key, { timestamp, timezone, bookings: [] });
+          groups.get(key).bookings.push(booking);
+        }
+        scheduleNode.innerHTML = [...groups.values()].map(group => {
+          const items = group.bookings.map(booking => {
+            const from = booking?.datePeriod?.from || {};
+            const to = booking?.datePeriod?.to || {};
+            const timezone = from.timezone || to.timezone || group.timezone;
+            return `<div class="schedule-item"><div class="schedule-item-time">${escapeHtml(formatBookingTime(from.timestamp, timezone))}–${escapeHtml(formatBookingTime(to.timestamp, timezone))}</div><div class="schedule-item-name">${escapeHtml(booking.name || 'Без названия')}</div></div>`;
+          }).join('');
+          return `<section class="schedule-day"><h3>${escapeHtml(formatBookingDay(group.timestamp, group.timezone))}</h3>${items}</section>`;
+        }).join('');
+      }
+
+      async function refreshSchedule() {
+        const recipient = contactsByRole.recipient;
+        const resourceId = Number(deal?.[substitutionFields.resourceId]);
+        if (!recipient || !resourceId) {
+          renderSchedule([], 'Назначьте подопечного и сиделку — тогда здесь появится расписание.');
+          return;
+        }
+        const timezone = 'Asia/Vladivostok';
+        const today = bookingDateParts(Math.floor(Date.now() / 1000), timezone);
+        const dateFrom = bookingTimestamp(`${today.year}-${today.month}-${today.day}T00:00`, timezone);
+        const dateTo = dateFrom + 60 * 24 * 60 * 60;
+        scheduleNode.innerHTML = '<p class="schedule-empty">Загружаю расписание…</p>';
+        refreshScheduleButton.disabled = true;
+        try {
+          const result = await call('booking.v1.booking.list', {
+            filter: {
+              within: { dateFrom, dateTo },
+              client: { entities: [{ code: 'CONTACT', module: 'crm', id: String(recipient.ID) }] }
+            },
+            order: { dateFrom: 'ASC', dateTo: 'ASC' }
+          });
+          const bookings = scheduleBookings(result)
+            .filter(booking => (booking.resourceIds || []).some(id => Number(id) === resourceId))
+            .sort((left, right) => Number(left?.datePeriod?.from?.timestamp) - Number(right?.datePeriod?.from?.timestamp));
+          renderSchedule(bookings);
+        } catch (error) {
+          console.warn('Не удалось загрузить расписание:', error);
+          renderSchedule([], 'Не удалось загрузить расписание. Попробуйте обновить ещё раз.');
+        } finally {
+          refreshScheduleButton.disabled = false;
+        }
+      }
+
       function escapeHtml(value) {
         return String(value || '').replace(/[&<>'"]/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[character]);
       }
@@ -580,6 +687,7 @@
         contactsByRole = contacts;
         render(contacts);
         renderBookingTarget();
+        await refreshSchedule();
       }
 
       function openDialog(roleKey) {
@@ -640,6 +748,7 @@
         const domain = new URLSearchParams(location.search).get('DOMAIN');
         if (domain) window.open(`https://${domain}/booking/`, '_blank');
       });
+      refreshScheduleButton.addEventListener('click', () => refreshSchedule());
 
       bookingForm.addEventListener('submit', async event => {
         event.preventDefault();
@@ -682,6 +791,7 @@
           bookingFrom.value = '';
           bookingTo.value = '';
           setBookingDefaults();
+          await refreshSchedule();
         } catch (error) { showError(error); }
         finally { renderBookingTarget(); }
       });

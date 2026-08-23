@@ -36,7 +36,7 @@ test('server and deal widget contain required integration calls', async () => {
   for (const method of ['ASSIGNED_BY_ID']) {
     assert.ok(server.includes(method), `server must use ${method}`);
   }
-  for (const method of ['crm.timeline.comment.add', 'booking.v1.resource.add', 'booking.v1.resource.update', 'booking.v1.resource.slots.set', 'booking.v1.booking.add', 'booking.v1.booking.client.set', 'booking.v1.booking.externalData.set']) {
+  for (const method of ['crm.timeline.comment.add', 'booking.v1.resource.add', 'booking.v1.resource.update', 'booking.v1.resource.slots.set', 'booking.v1.booking.add', 'booking.v1.booking.list', 'booking.v1.booking.client.set', 'booking.v1.booking.externalData.set']) {
     assert.ok(widget.includes(method), `widget must use ${method}`);
   }
   assert.doesNotMatch(server, /booking\.v1\.waitlist\./);
@@ -63,6 +63,9 @@ test('server and deal widget contain required integration calls', async () => {
   assert.match(widget, /isMain: 'Y'/);
   assert.match(widget, /Открыть Онлайн-запись/);
   assert.match(widget, /Создать запись/);
+  assert.match(widget, /Расписание/);
+  assert.match(widget, /Ближайшие 60 дней/);
+  assert.match(widget, /refreshSchedule/);
   assert.match(widget, /находит график по контакту подопечного/);
   assert.match(widget, /filter: \{ name \}/);
   assert.match(widget, /Ошибка: каталог ресурсов недоступен\./);
