@@ -3835,7 +3835,7 @@
 
   function defaultCarePlanIcon() {
     const icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-    icon.setAttribute('class', 'h-11 w-11 shrink-0 text-brand-500');
+    icon.setAttribute('class', 'h-5 w-5 shrink-0 text-brand-500');
     icon.setAttribute('viewBox', '0 0 24 24');
     icon.setAttribute('fill', 'none');
     icon.setAttribute('aria-hidden', 'true');
@@ -3870,7 +3870,7 @@
         const image = document.createElement('img');
         image.src = product.imageUrl;
         image.alt = product.name;
-        image.className = 'h-6 w-6 shrink-0 rounded-md object-cover bg-brand-50';
+        image.className = 'h-5 w-5 shrink-0 rounded-md object-cover bg-brand-50';
         image.addEventListener('error', function() { image.remove(); });
         card.appendChild(image);
       } else {
