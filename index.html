@@ -1723,6 +1723,11 @@
         border-radius: 9px;
       }
     }
+    @media (min-width: 640px) {
+      .calculator-grid-odd > label:last-child {
+        grid-column: span 2 / span 2;
+      }
+    }
   </style>
 
   <!-- Schema.org: LocalBusiness -->
@@ -3558,7 +3563,7 @@
                   <p class="text-xs text-gray-500 ml-9">24 часа — 4 500 ₽</p>
                 </div>
               </label>
-              <label class="relative cursor-pointer sm:col-span-2">
+              <label class="relative cursor-pointer">
                 <input type="radio" name="carePlan" value="live_in" class="peer sr-only" onchange="updateCareCalc()">
                 <div class="p-4 rounded-xl border-2 border-gray-200 peer-checked:border-brand-500 peer-checked:bg-brand-50 transition-all hover:border-gray-300 h-full">
                   <div class="flex items-center gap-3 mb-1"><svg class="w-5 h-5 flex-shrink-0" viewBox="0 0 24 24" fill="none"><path d="M3 12l9-7 9 7" stroke="#4F6F52" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"></path><path d="M5 10v10h14V10" stroke="#4F6F52" stroke-width="1.5"></path><rect x="9" y="14" width="6" height="6" rx="1" stroke="#A5B68D" stroke-width="1.5"></rect></svg><span class="font-semibold text-gray-800">С проживанием</span></div>
@@ -3838,6 +3843,12 @@
     return icon;
   }
 
+  function balanceCalculatorGrid(container) {
+    if (!container) return;
+    const cards = Array.from(container.children).filter(function(item) { return item.matches('label'); });
+    container.classList.toggle('calculator-grid-odd', cards.length % 2 === 1);
+  }
+
   function renderDynamicCarePlans() {
     const container = document.getElementById('carePlans');
     if (!container) return;
@@ -3859,7 +3870,7 @@
         const image = document.createElement('img');
         image.src = product.imageUrl;
         image.alt = product.name;
-        image.className = 'h-14 w-14 shrink-0 rounded-lg object-cover bg-brand-50';
+        image.className = 'h-6 w-6 shrink-0 rounded-md object-cover bg-brand-50';
         image.addEventListener('error', function() { image.remove(); });
         card.appendChild(image);
       } else {
@@ -3878,6 +3889,7 @@
       label.append(input, card);
       container.appendChild(label);
     });
+    balanceCalculatorGrid(container);
   }
 
   function renderDynamicSurchargePlans() {
@@ -3899,7 +3911,7 @@
         const image = document.createElement('img');
         image.src = product.imageUrl;
         image.alt = '';
-        image.className = 'h-10 w-10 shrink-0 rounded-lg object-cover bg-brand-50';
+        image.className = 'h-6 w-6 shrink-0 rounded-md object-cover bg-brand-50';
         image.addEventListener('error', function() { image.remove(); });
         label.appendChild(image);
       }
@@ -3914,6 +3926,7 @@
       label.appendChild(text);
       container.appendChild(label);
     });
+    balanceCalculatorGrid(container);
   }
 
   function applyCalculatorCatalog(catalog) {
