@@ -33,11 +33,11 @@
 <body>
   <main>
     <h1>Чек-лист смены</h1>
-    <p class="hint">Отметки синхронизируются с полем «Чек-лист смены» в этом предложении. Произвольные пункты здесь не создаются.</p>
+    <p class="hint">Отметки синхронизируются с полем «Чек-лист смены» в этом предложении. Каталог пунктов берётся из списка Bitrix24 «Чек-лист сиделки».</p>
     <section class="card">
       <div class="card-header"><h2>Выполненные пункты</h2><span class="counter" id="counter"></span></div>
       <div class="items" id="items"></div>
-      <p class="notice" id="catalog-notice">Сейчас видны пункты, уже пришедшие от страницы сиделок, и временный стартовый набор. После подключения инфоблока список будет автоматически заменён его данными.</p>
+      <p class="notice" id="catalog-notice">Загружаю каталог пунктов из списка Bitrix24…</p>
       <div class="actions">
         <button type="button" class="secondary" id="reload">Обновить</button>
         <button type="button" id="save">Сохранить</button>
@@ -50,8 +50,12 @@
   <script>
     (async () => {
       const CHECKLIST_FIELD = 'UF_CRM_CARE_SHIFT_CHECKLIST';
-      // Fallback is only used until the InfoBlock endpoint is supplied. Every
-      // item that has already arrived from the sitter page is also retained.
+      // The manager-maintained Bitrix24 List is the catalogue. Its element ID
+      // is stable even when a manager later renames a checklist item.
+      const CHECKLIST_LIST_ID = 28;
+      const CHECKLIST_LIST_TYPE = 'lists';
+      // Fallback makes a current selection removable if the Lists API is
+      // temporarily unavailable. It is never the main source of truth.
       const fallbackCatalog = [
         'Смена подгузников, абсорбирующего белья',
         'Влажное обтирание'
@@ -141,13 +145,37 @@
         setStatus('Загружаю чек-лист…');
         reloadButton.disabled = true;
         try {
-          const quote = await call('crm.quote.get', { id: quoteId });
+          const [quote, catalogResponse] = await Promise.all([
+            call('crm.quote.get', { id: quoteId }),
+            call('lists.element.get', {
+              IBLOCK_TYPE_ID: CHECKLIST_LIST_TYPE,
+              IBLOCK_ID: CHECKLIST_LIST_ID,
+              ELEMENT_ORDER: { ID: 'ASC' },
+              SELECT: ['ID', 'NAME'],
+              NAV_PARAMS: { nPageSize: 100 }
+            })
+          ]);
           const selected = fieldLines(quote?.[CHECKLIST_FIELD]);
-          items = mergeCatalog(fallbackCatalog, selected);
+          const catalogEntries = Array.isArray(catalogResponse)
+            ? catalogResponse
+            : Object.values(catalogResponse || {});
+          const catalog = catalogEntries.map(item => item?.NAME).filter(Boolean);
+          if (!catalog.length) throw new Error('Список «Чек-лист сиделки» пуст или недоступен.');
+          items = mergeCatalog(catalog, selected);
+          catalogNotice.textContent = `Каталог: список Bitrix24 «Чек-лист сиделки» — ${catalog.length} пунктов.`;
           render();
           setStatus(selected.length ? 'Отметки из предложения загружены.' : 'В предложении пока нет выполненных пунктов.');
         } catch (error) {
-          setStatus(friendlyError(error, 'Не удалось загрузить чек-лист.'), true);
+          // Preserve selections from the sitter page even if the Lists API is
+          // briefly unavailable, so a manager can still uncheck an item.
+          try {
+            const quote = await call('crm.quote.get', { id: quoteId });
+            const selected = fieldLines(quote?.[CHECKLIST_FIELD]);
+            items = mergeCatalog(fallbackCatalog, selected);
+            catalogNotice.textContent = 'Каталог Bitrix24 временно недоступен. Показаны текущие пункты и резервный набор.';
+            render();
+          } catch {}
+          setStatus(friendlyError(error, 'Не удалось загрузить каталог чек-листа.'), true);
         } finally {
           reloadButton.disabled = false;
         }
