@@ -72,7 +72,7 @@
 
       const normalize = value => String(value || '')
         .normalize('NFKC')
-        .replace(/^\s*(?:✅|✓|✔|☑|\[x\]|\[\s*x\s*\]|[-•])\s*/iu, '')
+        .replace(/^\s*(?:\[\s*(?:✅|✓|✔|☑)\s*\]|✅|✓|✔|☑|\[x\]|\[\s*x\s*\]|[-•])\s*/iu, '')
         .replace(/\s+/g, ' ')
         .trim()
         .toLocaleLowerCase('ru-RU');
@@ -111,7 +111,7 @@
           const key = normalize(label);
           if (!key || seen.has(key)) continue;
           seen.add(key);
-          result.push({ key, name: label.replace(/^\s*(?:✅|✓|✔|☑)\s*/u, ''), checked: selectedNames.some(item => normalize(item) === key) });
+          result.push({ key, name: label.replace(/^\s*(?:\[\s*(?:✅|✓|✔|☑)\s*\]|✅|✓|✔|☑)\s*/u, ''), checked: selectedNames.some(item => normalize(item) === key) });
         }
         return result;
       }
