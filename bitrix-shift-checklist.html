@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Чек-лист смены</title>
+  <style>
+    :root { color: #24333f; font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #f7faf9; }
+    main { max-width: 760px; margin: 0 auto; padding: 24px; }
+    h1 { margin: 0; font-size: 23px; color: #0a7164; }
+    .hint { margin: 6px 0 20px; color: #60707d; }
+    .card { padding: 18px; border: 1px solid #d7e8e2; border-radius: 14px; background: #fff; box-shadow: 0 4px 16px rgba(10, 113, 100, .05); }
+    .card-header { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px; align-items: baseline; margin-bottom: 12px; }
+    h2 { margin: 0; font-size: 17px; }
+    .counter { color: #61717b; font-size: 13px; }
+    .items { display: grid; gap: 8px; }
+    .item { display: flex; align-items: flex-start; gap: 10px; padding: 11px 12px; border: 1px solid #e3eeea; border-radius: 10px; cursor: pointer; }
+    .item:hover { border-color: #aad8ce; background: #fbfefd; }
+    .item input { width: 18px; height: 18px; margin: 1px 0 0; accent-color: #0a9c82; }
+    .item span { flex: 1; }
+    .empty { margin: 0; padding: 14px 0; color: #61717b; }
+    .notice { margin: 16px 0 0; padding: 11px 13px; border-radius: 9px; background: #f3f8f6; color: #52606d; font-size: 13px; }
+    .actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 18px; }
+    button { border: 0; border-radius: 9px; padding: 9px 12px; font: inherit; font-weight: 600; cursor: pointer; background: #0a7164; color: #fff; }
+    button.secondary { background: #e4f2ee; color: #075c52; }
+    button:disabled { cursor: wait; opacity: .65; }
+    .status { margin-top: 16px; padding: 11px 13px; border-radius: 9px; background: #edf8f4; color: #075c52; }
+    .status.error { background: #fff0f0; color: #a22d2d; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Чек-лист смены</h1>
+    <p class="hint">Отметки синхронизируются с полем «Чек-лист смены» в этом предложении. Произвольные пункты здесь не создаются.</p>
+    <section class="card">
+      <div class="card-header"><h2>Выполненные пункты</h2><span class="counter" id="counter"></span></div>
+      <div class="items" id="items"></div>
+      <p class="notice" id="catalog-notice">Сейчас видны пункты, уже пришедшие от страницы сиделок, и временный стартовый набор. После подключения инфоблока список будет автоматически заменён его данными.</p>
+      <div class="actions">
+        <button type="button" class="secondary" id="reload">Обновить</button>
+        <button type="button" id="save">Сохранить</button>
+      </div>
+    </section>
+    <div id="status" class="status">Загружаю чек-лист…</div>
+  </main>
+
+  <script src="https://unpkg.com/@bitrix24/b24jssdk@1/dist/umd/index.min.js"></script>
+  <script>
+    (async () => {
+      const CHECKLIST_FIELD = 'UF_CRM_CARE_SHIFT_CHECKLIST';
+      // Fallback is only used until the InfoBlock endpoint is supplied. Every
+      // item that has already arrived from the sitter page is also retained.
+      const fallbackCatalog = [
+        'Смена подгузников, абсорбирующего белья',
+        'Влажное обтирание'
+      ];
+      const status = document.getElementById('status');
+      const itemsNode = document.getElementById('items');
+      const counter = document.getElementById('counter');
+      const saveButton = document.getElementById('save');
+      const reloadButton = document.getElementById('reload');
+      const catalogNotice = document.getElementById('catalog-notice');
+      let b24;
+      let quoteId;
+      let items = [];
+
+      const normalize = value => String(value || '')
+        .normalize('NFKC')
+        .replace(/^\s*(?:✅|✓|✔|☑|\[x\]|\[\s*x\s*\]|[-•])\s*/iu, '')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .toLocaleLowerCase('ru-RU');
+
+      function setStatus(message, isError) {
+        status.textContent = message;
+        status.classList.toggle('error', Boolean(isError));
+      }
+
+      function friendlyError(error, fallback) {
+        const message = String(error?.message || error || '').toLowerCase();
+        if (/no_auth_found|expired_token|invalid.*auth|не авториз/.test(message)) return 'Нет доступа к Bitrix24.';
+        if (/insufficient_scope|access_denied|user_access_error|недостаточно прав|доступ запрещ/.test(message)) return 'Недостаточно прав для изменения предложения.';
+        if (/field|поле/.test(message)) return `В предложении не найдено поле ${CHECKLIST_FIELD}.`;
+        return fallback;
+      }
+
+      async function call(method, params) {
+        const response = await b24.actions.v2.call.make({ method, params, requestId: crypto.randomUUID() });
+        if (!response.isSuccess) throw new Error(response.getErrorMessages().join('; ') || `Не выполнен ${method}`);
+        return response.getData()?.result;
+      }
+
+      function fieldLines(value) {
+        const raw = Array.isArray(value) ? value.join('\n') : String(value || '');
+        return raw.split(/\r?\n/)
+          .map(line => line.trim())
+          .filter(line => line && !/^комментарий\s*:/i.test(line));
+      }
+
+      function mergeCatalog(names, selectedNames) {
+        const result = [];
+        const seen = new Set();
+        for (const name of [...names, ...selectedNames]) {
+          const label = String(name || '').trim();
+          const key = normalize(label);
+          if (!key || seen.has(key)) continue;
+          seen.add(key);
+          result.push({ key, name: label.replace(/^\s*(?:✅|✓|✔|☑)\s*/u, ''), checked: selectedNames.some(item => normalize(item) === key) });
+        }
+        return result;
+      }
+
+      function render() {
+        itemsNode.replaceChildren();
+        const checked = items.filter(item => item.checked).length;
+        counter.textContent = `${checked} из ${items.length} отмечено`;
+        if (!items.length) {
+          const empty = document.createElement('p');
+          empty.className = 'empty';
+          empty.textContent = 'Пункты чек-листа пока не получены.';
+          itemsNode.append(empty);
+          return;
+        }
+        for (const item of items) {
+          const label = document.createElement('label');
+          label.className = 'item';
+          const input = document.createElement('input');
+          input.type = 'checkbox';
+          input.checked = item.checked;
+          input.addEventListener('change', () => { item.checked = input.checked; render(); });
+          const text = document.createElement('span');
+          text.textContent = item.name;
+          label.append(input, text);
+          itemsNode.append(label);
+        }
+      }
+
+      async function load() {
+        setStatus('Загружаю чек-лист…');
+        reloadButton.disabled = true;
+        try {
+          const quote = await call('crm.quote.get', { id: quoteId });
+          const selected = fieldLines(quote?.[CHECKLIST_FIELD]);
+          items = mergeCatalog(fallbackCatalog, selected);
+          render();
+          setStatus(selected.length ? 'Отметки из предложения загружены.' : 'В предложении пока нет выполненных пунктов.');
+        } catch (error) {
+          setStatus(friendlyError(error, 'Не удалось загрузить чек-лист.'), true);
+        } finally {
+          reloadButton.disabled = false;
+        }
+      }
+
+      async function save() {
+        saveButton.disabled = true;
+        const selected = items.filter(item => item.checked).map(item => `✅ ${item.name}`);
+        try {
+          await call('crm.quote.update', { id: quoteId, fields: { [CHECKLIST_FIELD]: selected.join('\n') } });
+          setStatus(selected.length ? 'Чек-лист сохранён в предложении.' : 'Все отметки сняты: поле чек-листа очищено.');
+        } catch (error) {
+          setStatus(friendlyError(error, 'Не удалось сохранить чек-лист.'), true);
+        } finally {
+          saveButton.disabled = false;
+        }
+      }
+
+      reloadButton.addEventListener('click', load);
+      saveButton.addEventListener('click', save);
+      try {
+        b24 = await B24Js.initializeB24Frame();
+        quoteId = Number(b24.placement?.options?.ID || 0);
+        if (!Number.isInteger(quoteId) || quoteId <= 0) throw new Error('Не удалось определить предложение. Откройте вкладку из карточки предложения.');
+        await load();
+      } catch (error) {
+        setStatus(friendlyError(error, error.message || 'Не удалось открыть приложение.'), true);
+      }
+    })();
+  </script>
+</body>
+</html>

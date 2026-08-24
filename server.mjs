@@ -996,7 +996,12 @@ createServer(async (request, response) => {
   // статические файлы сайта доступны только для чтения.
   const bitrixParticipantPages = {
     '/api/bitrix/participants/install': 'bitrix-participants-install.html',
-    '/api/bitrix/participants/widget': 'bitrix-participants.html'
+    '/api/bitrix/participants/widget': 'bitrix-participants.html',
+    // Separate local Bitrix24 app for the shift checklist. It deliberately
+    // uses a different placement and does not change the deal participants
+    // application above.
+    '/api/bitrix/shift-checklist/install': 'bitrix-shift-checklist-install.html',
+    '/api/bitrix/shift-checklist/widget': 'bitrix-shift-checklist.html'
   };
   if ((request.method === 'GET' || request.method === 'POST') && bitrixParticipantPages[url.pathname]) {
     const pagePath = join(siteRoot, bitrixParticipantPages[url.pathname]);
