@@ -532,15 +532,62 @@ function productPropertyText(value, parts = []) {
   return parts;
 }
 
-function calculatorPositionType(product) {
-  // «Тип позиции» — характеристика каталога Bitrix24. Номер свойства
-  // создаётся порталом, поэтому распознаём значение по любому PROPERTY_*.
+function calculatorPositionTypeFromText(value) {
+  const text = cleanText(value, 300).toLocaleLowerCase('ru-RU');
+  if (text.includes('надбавка')) return 'surcharge';
+  if (text.includes('тип ухода')) return 'care';
+  return '';
+}
+
+async function getCalculatorPositionProperty() {
+  // Старый CRM-метод возвращает и ID свойства, и варианты выпадающего
+  // списка. Он доступен тому же вебхуку, которым уже читаются товары.
+  try {
+    const properties = indexedValues(await bitrixCall('crm.product.property.list', {
+      order: { ID: 'ASC' }
+    }));
+    const property = properties.find(item =>
+      cleanText(item?.NAME, 200).toLocaleLowerCase('ru-RU') === 'тип позиции'
+      && (!item?.IBLOCK_ID || Number(item.IBLOCK_ID) === calculatorCatalogId)
+    );
+    if (!property?.ID) return null;
+
+    const enumTypes = new Map();
+    indexedValues(property.VALUES).forEach(item => {
+      const id = cleanText(item?.ID, 80);
+      const type = calculatorPositionTypeFromText(item?.VALUE);
+      if (id && type) enumTypes.set(id, type);
+    });
+    return { id: Number(property.ID), enumTypes };
+  } catch (error) {
+    console.warn('Calculator position property could not be read:', error.message);
+    return null;
+  }
+}
+
+function calculatorPositionType(product, positionProperty) {
+  // В crm.product.list значение списочной характеристики приходит как ID
+  // варианта, например PROPERTY_123: "456", а не как «Надбавка».
+  const propertyKey = positionProperty?.id ? `PROPERTY_${positionProperty.id}` : '';
+  const exactValues = propertyKey
+    ? Object.entries(product || {})
+      .filter(([key]) => key.toUpperCase() === propertyKey)
+      .flatMap(([, value]) => productPropertyText(value))
+    : [];
+  for (const value of exactValues) {
+    const type = positionProperty?.enumTypes?.get(cleanText(value, 80)) || calculatorPositionTypeFromText(value);
+    if (type) return type;
+  }
+
+  // Запасной вариант для облачных порталов, которые отдают текстовое
+  // значение свойства сразу.
   const propertyValues = Object.entries(product || {})
     .filter(([key]) => /^PROPERTY_/i.test(key))
     .flatMap(([, value]) => productPropertyText(value));
-  const text = propertyValues.join(' ').toLocaleLowerCase('ru-RU');
-  if (text.includes('надбавка')) return 'surcharge';
-  if (text.includes('тип ухода')) return 'care';
+  for (const value of propertyValues) {
+    const type = calculatorPositionTypeFromText(value);
+    if (type) return type;
+  }
   return '';
 }
 
@@ -550,11 +597,11 @@ function visibleProductDescription(product) {
     .trim();
 }
 
-function isDynamicCatalogProduct(product, legacyIds, type) {
+function isDynamicCatalogProduct(product, legacyIds, type, positionProperty) {
   const id = Number(product?.ID);
   const name = cleanText(product?.NAME, 300);
   if (!id || !name || legacyIds.has(id) || product?.ACTIVE === 'N') return false;
-  return calculatorPositionType(product) === type;
+  return calculatorPositionType(product, positionProperty) === type;
 }
 
 async function getCalculatorCatalog(force = false) {
@@ -568,6 +615,7 @@ async function getCalculatorCatalog(force = false) {
     // PROPERTY_* нужен для характеристики «Тип позиции».
     select: ['ID', 'NAME', 'PRICE', 'CURRENCY_ID', 'CODE', 'XML_ID', 'DESCRIPTION', 'ACTIVE', 'PREVIEW_PICTURE', 'DETAIL_PICTURE', 'PROPERTY_*']
   });
+  const positionProperty = await getCalculatorPositionProperty();
   const byId = new Map(indexedValues(products).map(product => [Number(product?.ID), product]));
   const missing = Object.entries(calculatorProductIds)
     .filter(([, id]) => !byId.has(id))
@@ -592,10 +640,10 @@ async function getCalculatorCatalog(force = false) {
 
   const legacyIds = new Set(Object.values(calculatorProductIds));
   const dynamicCarePlans = indexedValues(products)
-    .filter(product => isDynamicCatalogProduct(product, legacyIds, 'care'))
+    .filter(product => isDynamicCatalogProduct(product, legacyIds, 'care', positionProperty))
     .map(product => itemFromProduct(dynamicCareKey(product.ID), product));
   const dynamicSurcharges = indexedValues(products)
-    .filter(product => isDynamicCatalogProduct(product, legacyIds, 'surcharge'))
+    .filter(product => isDynamicCatalogProduct(product, legacyIds, 'surcharge', positionProperty))
     .map(product => itemFromProduct(dynamicSurchargeKey(product.ID), product));
   dynamicCarePlans.forEach(product => { items[product.key] = product; });
   dynamicSurcharges.forEach(product => { items[product.key] = product; });
