@@ -514,15 +514,34 @@ function dynamicCareKey(productId) {
   return `care_${Number(productId)}`;
 }
 
-function dynamicCareMarker(product) {
-  const externalCode = cleanText(product?.CODE || product?.XML_ID, 100).toLowerCase();
-  if (/^calculator_care_[a-z0-9_-]+$/i.test(externalCode)) return externalCode;
-  // Некоторые версии CRM Product API не отдают «Внешний код» в списке,
-  // хотя он сохранён в интерфейсе. В этом случае работает тот же маркер
-  // отдельной строкой в описании товара.
-  const description = cleanText(product?.DESCRIPTION, 500).toLowerCase();
-  const match = description.match(/(?:^|\n)\s*\[?(calculator_care_[a-z0-9_-]+)\]?\s*(?:\n|$)/i);
-  return match ? match[1].toLowerCase() : '';
+function dynamicSurchargeKey(productId) {
+  return `surcharge_${Number(productId)}`;
+}
+
+function productPropertyText(value, parts = []) {
+  if (value === null || value === undefined) return parts;
+  if (typeof value === 'string' || typeof value === 'number') {
+    parts.push(String(value));
+    return parts;
+  }
+  if (Array.isArray(value)) {
+    value.forEach(item => productPropertyText(item, parts));
+    return parts;
+  }
+  if (typeof value === 'object') Object.values(value).forEach(item => productPropertyText(item, parts));
+  return parts;
+}
+
+function calculatorPositionType(product) {
+  // «Тип позиции» — характеристика каталога Bitrix24. Номер свойства
+  // создаётся порталом, поэтому распознаём значение по любому PROPERTY_*.
+  const propertyValues = Object.entries(product || {})
+    .filter(([key]) => /^PROPERTY_/i.test(key))
+    .flatMap(([, value]) => productPropertyText(value));
+  const text = propertyValues.join(' ').toLocaleLowerCase('ru-RU');
+  if (text.includes('надбавка')) return 'surcharge';
+  if (text.includes('тип ухода')) return 'care';
+  return '';
 }
 
 function visibleProductDescription(product) {
@@ -531,16 +550,11 @@ function visibleProductDescription(product) {
     .trim();
 }
 
-function isDynamicCareProduct(product, legacyIds) {
+function isDynamicCatalogProduct(product, legacyIds, type) {
   const id = Number(product?.ID);
   const name = cleanText(product?.NAME, 300);
-  const code = dynamicCareMarker(product);
   if (!id || !name || legacyIds.has(id) || product?.ACTIVE === 'N') return false;
-  // В каталоге есть служебные, тестовые и разовые позиции. Поэтому новый
-  // тип ухода попадает на публичный сайт только по явному маркеру, а не по
-  // одному названию. Менеджер указывает его один раз в поле «Символьный код»
-  // карточки товара: calculator_care_<любой_код>.
-  return /^calculator_care_[a-z0-9_-]+$/i.test(code);
+  return calculatorPositionType(product) === type;
 }
 
 async function getCalculatorCatalog(force = false) {
@@ -551,7 +565,8 @@ async function getCalculatorCatalog(force = false) {
   const products = await bitrixCall('crm.product.list', {
     order: { ID: 'ASC' },
     filter: { CATALOG_ID: calculatorCatalogId },
-    select: ['ID', 'NAME', 'PRICE', 'CURRENCY_ID', 'CODE', 'XML_ID', 'DESCRIPTION', 'ACTIVE', 'PREVIEW_PICTURE', 'DETAIL_PICTURE']
+    // PROPERTY_* нужен для характеристики «Тип позиции».
+    select: ['ID', 'NAME', 'PRICE', 'CURRENCY_ID', 'CODE', 'XML_ID', 'DESCRIPTION', 'ACTIVE', 'PREVIEW_PICTURE', 'DETAIL_PICTURE', 'PROPERTY_*']
   });
   const byId = new Map(indexedValues(products).map(product => [Number(product?.ID), product]));
   const missing = Object.entries(calculatorProductIds)
@@ -577,18 +592,22 @@ async function getCalculatorCatalog(force = false) {
 
   const legacyIds = new Set(Object.values(calculatorProductIds));
   const dynamicCarePlans = indexedValues(products)
-    .filter(product => isDynamicCareProduct(product, legacyIds))
+    .filter(product => isDynamicCatalogProduct(product, legacyIds, 'care'))
     .map(product => itemFromProduct(dynamicCareKey(product.ID), product));
+  const dynamicSurcharges = indexedValues(products)
+    .filter(product => isDynamicCatalogProduct(product, legacyIds, 'surcharge'))
+    .map(product => itemFromProduct(dynamicSurchargeKey(product.ID), product));
   dynamicCarePlans.forEach(product => { items[product.key] = product; });
+  dynamicSurcharges.forEach(product => { items[product.key] = product; });
 
   const catalog = {
     catalogId: calculatorCatalogId,
     fetchedAt: new Date().toISOString(),
     items,
-    // Эти товары фронтенд добавляет к карточкам ухода сам. Для знакомых
-    // форматов остаются фирменные иллюстрации и специальные правила; новая
-    // карточка использует картинку из товара Bitrix24.
-    dynamicCarePlans
+    // Старые позиции сохраняют свою специальную логику. Новые добавляются
+    // по характеристике «Тип позиции» и получают обычный расчёт по цене.
+    dynamicCarePlans,
+    dynamicSurcharges
   };
   calculatorCatalogCache = { value: catalog, expiresAt: Date.now() + 60_000 };
   return catalog;
@@ -637,6 +656,13 @@ function requestedCheckbox(calculation, name) {
   return Boolean(calculation?.surcharges && calculation.surcharges[name]);
 }
 
+function selectedDynamicSurchargeKeys(calculation, catalog) {
+  const available = new Set(indexedValues(catalog?.dynamicSurcharges).map(item => item.key));
+  return [...new Set(indexedValues(calculation?.dynamicSurcharges)
+    .map(key => cleanText(key, 80))
+    .filter(key => available.has(key)))];
+}
+
 function addPercentageRow(rows, catalog, key, quantity, basePrice) {
   const product = catalog.items[key];
   if (!product?.percent) throw new Error(`У товара «${product?.name || key}» не указана процентная надбавка в названии`);
@@ -677,6 +703,14 @@ function buildCalculatorProductRows(calculation, catalog) {
     const product = catalog.items.surcharge_urgent;
     rows.push({ PRODUCT_ID: product.id, PRICE: product.price, QUANTITY: 1, SORT: rows.length + 1 });
   }
+  // Новые надбавки всегда фиксированные и применяются к каждому выбранному
+  // выходу. Процентные и автоматические правила остаются у старых позиций.
+  selectedDynamicSurchargeKeys(calculation, catalog).forEach(key => {
+    const product = catalog.items[key];
+    if (product?.id && product.price) {
+      rows.push({ PRODUCT_ID: product.id, PRICE: product.price, QUANTITY: quantity, SORT: rows.length + 1 });
+    }
+  });
   return rows;
 }
 
