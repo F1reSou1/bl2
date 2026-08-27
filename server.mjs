@@ -76,10 +76,6 @@ const openLine = {
   oauthUrl: (process.env.BITRIX_OPENLINE_OAUTH_URL || 'https://oauth.bitrix.info/oauth/token/').trim(),
   storePath: resolve(process.env.CHAT_BRIDGE_STORE_PATH || join(siteRoot, 'data', 'openline-chat.json'))
 };
-// Секрет проверяет, что уведомление о новой сделке пришло именно из Bitrix24.
-// Используем отдельную переменную, а до её добавления — уже настроенный
-// секрет локального приложения Bitrix24.
-const dealLinkEventToken = (process.env.BITRIX_DEAL_LINK_EVENT_TOKEN || openLine.callbackToken || '').trim();
 const connectorIcon = {
   DATA_IMAGE: 'data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%2070%2071%22%3E%3Crect%20width%3D%2270%22%20height%3D%2271%22%20rx%3D%2216%22%20fill%3D%22%230a7164%22/%3E%3Cpath%20d%3D%22M17%2020h36v25H31l-10%208v-8h-4z%22%20fill%3D%22white%22/%3E%3C/svg%3E',
   COLOR: '#0a7164', SIZE: '100%', POSITION: 'center'
@@ -376,17 +372,35 @@ async function bitrixCall(method, payload) {
   return body.result;
 }
 
-async function bindDealLinkEvent() {
-  if (!bitrixWebhookUrl || !isOpenLineConfigured()) return;
-  const handlerUrl = openLineCallbackUrl('/api/bitrix/deal-created');
+let dealLinkSyncRunning = false;
+
+// Входящий вебхук портала умеет читать и менять CRM, но не имеет права
+// подписываться на event.bind. Поэтому короткая сверка заменяет недоступное
+// событие и работает и для ручных сделок, и для сделок с сайта. Берём только
+// новую стадию нужного направления и не трогаем уже заполненный комментарий.
+async function ensureNewDealLinks() {
+  if (!bitrixWebhookUrl || dealLinkSyncRunning) return;
+  dealLinkSyncRunning = true;
   try {
-    await bitrixCall('event.unbind', { event: 'OnCrmDealAdd', handler: handlerUrl });
-  } catch (error) {
-    // До первой установки подписки Bitrix24 закономерно нечего отвязывать.
-    console.info('Deal-created event unbind skipped:', error.message);
+    const deals = indexedValues(await bitrixCall('crm.deal.list', {
+      order: { ID: 'DESC' },
+      filter: { CATEGORY_ID: 2, STAGE_ID: 'C2:NEW' },
+      select: ['ID', 'COMMENTS']
+    }));
+    let updated = 0;
+    for (const deal of deals) {
+      const dealId = Number(deal?.ID);
+      if (!Number.isInteger(dealId) || dealId <= 0 || cleanText(deal?.COMMENTS)) continue;
+      await bitrixCall('crm.deal.update', {
+        id: dealId,
+        fields: { COMMENTS: `https://blizkie-sitters.interra.team/deals/${dealId}` }
+      });
+      updated += 1;
+    }
+    if (updated) console.info(`Deal-link sync updated ${updated} deal(s)`);
+  } finally {
+    dealLinkSyncRunning = false;
   }
-  await bitrixCall('event.bind', { event: 'OnCrmDealAdd', handler: handlerUrl });
-  console.info('Deal-created event bound');
 }
 
 async function getRoutingStore() {
@@ -1168,32 +1182,6 @@ createServer(async (request, response) => {
     }
   }
 
-  // Исходящий вебхук Bitrix24 вызывает этот обработчик для любой новой
-  // сделки, в том числе созданной вручную в CRM. Роботы CRM не всегда
-  // запускаются при создании сделки в первой стадии, поэтому не полагаемся
-  // на них для обязательной ссылки на сервис сиделок.
-  if (request.method === 'POST' && url.pathname === '/api/bitrix/deal-created') {
-    try {
-      if (!dealLinkEventToken || url.searchParams.get('token') !== dealLinkEventToken) {
-        return json(response, 403, { ok: false, error: 'Недействительный токен обработчика' });
-      }
-      const payload = await readBody(request);
-      if (String(payload?.event || '').toUpperCase() !== 'ONCRMDEALADD') {
-        return json(response, 200, { ok: true, ignored: true });
-      }
-      const dealId = Number(payload?.data?.FIELDS?.ID);
-      if (!Number.isInteger(dealId) || dealId <= 0) throw new Error('Bitrix24 не передал ID сделки');
-      await bitrixCall('crm.deal.update', {
-        id: dealId,
-        fields: { COMMENTS: `https://blizkie-sitters.interra.team/deals/${dealId}` }
-      });
-      return json(response, 200, { ok: true, dealId });
-    } catch (error) {
-      console.error('Deal link event failed:', error.message);
-      return json(response, 502, { ok: false, error: 'Не удалось записать ссылку в сделку' });
-    }
-  }
-
   if ((request.method === 'POST' || request.method === 'GET') && url.pathname === '/api/bitrix/openline/install') {
     try {
       if (!isOpenLineConfigured()) throw new Error('Сервер ещё не настроен для локального приложения');
@@ -1297,9 +1285,13 @@ createServer(async (request, response) => {
   }, 60 * 60 * 1000);
   substitutionTimer.unref();
 
-  // Отдельная подписка на создание сделки нужна для ручного добавления в
-  // CRM: робот в первой стадии в таком сценарии может не запуститься.
-  bindDealLinkEvent().catch(error => console.error('Deal-created event bind failed:', error.message));
+  // Ручные сделки не всегда запускают робот в первой стадии. Периодически
+  // дополняем только пустые комментарии ссылкой на карточку в сервисе.
+  ensureNewDealLinks().catch(error => console.error('Deal-link sync failed:', error.message));
+  const dealLinkTimer = setInterval(() => {
+    ensureNewDealLinks().catch(error => console.error('Deal-link sync failed:', error.message));
+  }, 15 * 1000);
+  dealLinkTimer.unref();
 
   // Подписку на ответ менеджера нужно восстанавливать и после обычного
   // перезапуска сайта: данные авторизации приложения сохранены в volume,

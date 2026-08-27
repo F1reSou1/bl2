@@ -36,6 +36,8 @@ test('server and deal widget contain required integration calls', async () => {
   for (const method of ['ASSIGNED_BY_ID', 'COMMENTS', 'blizkie-sitters.interra.team/deals/${dealId}']) {
     assert.ok(server.includes(method), `server must use ${method}`);
   }
+  assert.match(server, /ensureNewDealLinks/);
+  assert.match(server, /CATEGORY_ID: 2, STAGE_ID: 'C2:NEW'/);
   for (const method of ['crm.timeline.comment.add', 'booking.v1.resource.add', 'booking.v1.resource.update', 'booking.v1.resource.slots.set', 'booking.v1.booking.add', 'booking.v1.booking.list', 'booking.v1.booking.client.set', 'booking.v1.booking.externalData.set']) {
     assert.ok(widget.includes(method), `widget must use ${method}`);
   }
