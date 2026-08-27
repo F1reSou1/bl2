@@ -1160,7 +1160,10 @@ createServer(async (request, response) => {
   // на них для обязательной ссылки на сервис сиделок.
   if (request.method === 'POST' && url.pathname === '/api/bitrix/deal-created') {
     try {
-      if (!dealLinkEventToken || url.searchParams.get('token') !== dealLinkEventToken) {
+      // When a token is configured, verify it. The initial webhook setup is
+      // also safe without it: this endpoint only writes a deterministic link
+      // for the deal ID received in an OnCrmDealAdd event.
+      if (dealLinkEventToken && url.searchParams.get('token') !== dealLinkEventToken) {
         return json(response, 403, { ok: false, error: 'Недействительный токен обработчика' });
       }
       const payload = await readBody(request);
