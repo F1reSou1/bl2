@@ -33,7 +33,7 @@ test('server and deal widget contain required integration calls', async () => {
     readFile(new URL('../server.mjs', import.meta.url), 'utf8'),
     readFile(new URL('../bitrix-participants.html', import.meta.url), 'utf8')
   ]);
-  for (const method of ['ASSIGNED_BY_ID']) {
+  for (const method of ['ASSIGNED_BY_ID', 'COMMENTS', 'blizkie-sitters.interra.team/deals/${dealId}']) {
     assert.ok(server.includes(method), `server must use ${method}`);
   }
   for (const method of ['crm.timeline.comment.add', 'booking.v1.resource.add', 'booking.v1.resource.update', 'booking.v1.resource.slots.set', 'booking.v1.booking.add', 'booking.v1.booking.list', 'booking.v1.booking.client.set', 'booking.v1.booking.externalData.set']) {

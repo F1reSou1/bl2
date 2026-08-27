@@ -892,6 +892,21 @@ async function createBitrixDeal(lead) {
   if (calculatorDetailsField && calculatorDetails) fields[calculatorDetailsField] = calculatorDetails;
   if (categories[leadType] !== '') fields.CATEGORY_ID = Number(categories[leadType]);
   const dealId = await bitrixCall('crm.deal.add', { fields });
+
+  // Роботы CRM не всегда запускаются для сделки, которая создана через REST.
+  // Поэтому техническую ссылку записываем сразу после получения ID сделки, не
+  // перекладывая это на автоматизацию воронки. Ошибка этой дополнительной
+  // записи не должна превращать уже созданную заявку в неотправленную и
+  // провоцировать посетителя отправить форму повторно.
+  try {
+    await bitrixCall('crm.deal.update', {
+      id: dealId,
+      fields: { COMMENTS: `https://blizkie-sitters.interra.team/deals/${dealId}` }
+    });
+  } catch (error) {
+    console.error(`Deal link update failed for #${dealId}:`, error.message);
+  }
+
   if (productRows?.length) await bitrixCall('crm.deal.productrows.set', { id: dealId, rows: productRows });
   return { dealId, assignedManagerId };
 }
