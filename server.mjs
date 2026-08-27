@@ -376,6 +376,19 @@ async function bitrixCall(method, payload) {
   return body.result;
 }
 
+async function bindDealLinkEvent() {
+  if (!bitrixWebhookUrl || !isOpenLineConfigured()) return;
+  const handlerUrl = openLineCallbackUrl('/api/bitrix/deal-created');
+  try {
+    await bitrixCall('event.unbind', { event: 'OnCrmDealAdd', handler: handlerUrl });
+  } catch (error) {
+    // До первой установки подписки Bitrix24 закономерно нечего отвязывать.
+    console.info('Deal-created event unbind skipped:', error.message);
+  }
+  await bitrixCall('event.bind', { event: 'OnCrmDealAdd', handler: handlerUrl });
+  console.info('Deal-created event bound');
+}
+
 async function getRoutingStore() {
   if (!routingStorePromise) {
     routingStorePromise = fs.readFile(routingStorePath, 'utf8')
@@ -1283,6 +1296,10 @@ createServer(async (request, response) => {
     restoreExpiredSubstitutions().catch(error => console.error('Substitution restore failed:', error.message));
   }, 60 * 60 * 1000);
   substitutionTimer.unref();
+
+  // Отдельная подписка на создание сделки нужна для ручного добавления в
+  // CRM: робот в первой стадии в таком сценарии может не запуститься.
+  bindDealLinkEvent().catch(error => console.error('Deal-created event bind failed:', error.message));
 
   // Подписку на ответ менеджера нужно восстанавливать и после обычного
   // перезапуска сайта: данные авторизации приложения сохранены в volume,
