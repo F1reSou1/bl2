@@ -7,6 +7,9 @@ import { chooseNextManager, isSubstitutionActive, parseIdList } from './crm-auto
 
 const siteRoot = resolve(fileURLToPath(new URL('.', import.meta.url)));
 const port = Number(process.env.PORT || 80);
+// Секрет проверяет, что уведомление о новой сделке пришло именно из Bitrix24,
+// а не от произвольного посетителя сайта.
+const dealLinkEventToken = (process.env.BITRIX_DEAL_LINK_EVENT_TOKEN || '').trim();
 // Dokploy создаёт .env во время сборки. У уже работающего Docker-сервиса
 // может остаться одноимённая устаревшая системная переменная, поэтому для
 // каталога сознательно читаем значение из этого файла раньше process.env.
@@ -1148,6 +1151,32 @@ createServer(async (request, response) => {
     } catch (error) {
       console.error('Lead delivery failed:', error.message);
       return json(response, 502, { ok: false, error: 'Заявка временно не отправлена' });
+    }
+  }
+
+  // Исходящий вебхук Bitrix24 вызывает этот обработчик для любой новой
+  // сделки, в том числе созданной вручную в CRM. Роботы CRM не всегда
+  // запускаются при создании сделки в первой стадии, поэтому не полагаемся
+  // на них для обязательной ссылки на сервис сиделок.
+  if (request.method === 'POST' && url.pathname === '/api/bitrix/deal-created') {
+    try {
+      if (!dealLinkEventToken || url.searchParams.get('token') !== dealLinkEventToken) {
+        return json(response, 403, { ok: false, error: 'Недействительный токен обработчика' });
+      }
+      const payload = await readBody(request);
+      if (String(payload?.event || '').toUpperCase() !== 'ONCRMDEALADD') {
+        return json(response, 200, { ok: true, ignored: true });
+      }
+      const dealId = Number(payload?.data?.FIELDS?.ID);
+      if (!Number.isInteger(dealId) || dealId <= 0) throw new Error('Bitrix24 не передал ID сделки');
+      await bitrixCall('crm.deal.update', {
+        id: dealId,
+        fields: { COMMENTS: `https://blizkie-sitters.interra.team/deals/${dealId}` }
+      });
+      return json(response, 200, { ok: true, dealId });
+    } catch (error) {
+      console.error('Deal link event failed:', error.message);
+      return json(response, 502, { ok: false, error: 'Не удалось записать ссылку в сделку' });
     }
   }
 
