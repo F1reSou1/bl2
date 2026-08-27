@@ -7,9 +7,6 @@ import { chooseNextManager, isSubstitutionActive, parseIdList } from './crm-auto
 
 const siteRoot = resolve(fileURLToPath(new URL('.', import.meta.url)));
 const port = Number(process.env.PORT || 80);
-// Секрет проверяет, что уведомление о новой сделке пришло именно из Bitrix24,
-// а не от произвольного посетителя сайта.
-const dealLinkEventToken = (process.env.BITRIX_DEAL_LINK_EVENT_TOKEN || '').trim();
 // Dokploy создаёт .env во время сборки. У уже работающего Docker-сервиса
 // может остаться одноимённая устаревшая системная переменная, поэтому для
 // каталога сознательно читаем значение из этого файла раньше process.env.
@@ -79,6 +76,10 @@ const openLine = {
   oauthUrl: (process.env.BITRIX_OPENLINE_OAUTH_URL || 'https://oauth.bitrix.info/oauth/token/').trim(),
   storePath: resolve(process.env.CHAT_BRIDGE_STORE_PATH || join(siteRoot, 'data', 'openline-chat.json'))
 };
+// Секрет проверяет, что уведомление о новой сделке пришло именно из Bitrix24.
+// Используем отдельную переменную, а до её добавления — уже настроенный
+// секрет локального приложения Bitrix24.
+const dealLinkEventToken = (process.env.BITRIX_DEAL_LINK_EVENT_TOKEN || openLine.callbackToken || '').trim();
 const connectorIcon = {
   DATA_IMAGE: 'data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%2070%2071%22%3E%3Crect%20width%3D%2270%22%20height%3D%2271%22%20rx%3D%2216%22%20fill%3D%22%230a7164%22/%3E%3Cpath%20d%3D%22M17%2020h36v25H31l-10%208v-8h-4z%22%20fill%3D%22white%22/%3E%3C/svg%3E',
   COLOR: '#0a7164', SIZE: '100%', POSITION: 'center'
@@ -1160,10 +1161,7 @@ createServer(async (request, response) => {
   // на них для обязательной ссылки на сервис сиделок.
   if (request.method === 'POST' && url.pathname === '/api/bitrix/deal-created') {
     try {
-      // When a token is configured, verify it. The initial webhook setup is
-      // also safe without it: this endpoint only writes a deterministic link
-      // for the deal ID received in an OnCrmDealAdd event.
-      if (dealLinkEventToken && url.searchParams.get('token') !== dealLinkEventToken) {
+      if (!dealLinkEventToken || url.searchParams.get('token') !== dealLinkEventToken) {
         return json(response, 403, { ok: false, error: 'Недействительный токен обработчика' });
       }
       const payload = await readBody(request);
