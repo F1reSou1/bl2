@@ -37,6 +37,8 @@ test('server and deal widget contain required integration calls', async () => {
     assert.ok(server.includes(method), `server must use ${method}`);
   }
   assert.match(server, /ensureNewDealLinks/);
+  assert.match(server, /ensureNewShiftBookingLinks/);
+  assert.match(server, /booking\.v1\.booking\.list/);
   assert.match(server, /CATEGORY_ID: 2, STAGE_ID: 'C2:NEW'/);
   for (const method of ['crm.timeline.comment.add', 'booking.v1.resource.add', 'booking.v1.resource.update', 'booking.v1.resource.slots.set', 'booking.v1.booking.add', 'booking.v1.booking.list', 'booking.v1.booking.client.set', 'booking.v1.booking.externalData.set']) {
     assert.ok(widget.includes(method), `widget must use ${method}`);
@@ -67,8 +69,7 @@ test('server and deal widget contain required integration calls', async () => {
   assert.match(widget, /UF_CRM_1787843951/);
   assert.match(widget, /UF_CRM_1787823737/);
   assert.match(widget, /UF_CRM_CARE_BOOKING_ID/);
-  assert.match(widget, /syncShiftLinks/);
-  assert.match(widget, /autoMatchToleranceSeconds/);
+  assert.match(widget, /loadShiftLinks/);
   assert.match(widget, /Управление чек-листом/);
   assert.match(widget, /Ручное проставление смены/);
   assert.match(widget, /sitters\.blizkie-vl\.ru\/checklist/);
@@ -78,7 +79,7 @@ test('server and deal widget contain required integration calls', async () => {
   assert.match(widget, /Расписание/);
   assert.match(widget, /Ближайшие 60 дней/);
   assert.match(widget, /refreshSchedule/);
-  assert.match(widget, /Однозначно совпадающие смены привязываются автоматически/);
+  assert.match(widget, /Связанные смены отмечены под соответствующими записями/);
   assert.match(widget, /filter: \{ name \}/);
   assert.match(widget, /Ошибка: каталог ресурсов недоступен\./);
   assert.match(widget, /Готово: контакт назначен\./);

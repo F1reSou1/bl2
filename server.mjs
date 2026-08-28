@@ -48,6 +48,19 @@ const substitutionFields = {
   until: (process.env.BITRIX_SUBSTITUTION_UNTIL_FIELD || 'UF_CRM_SUBSTITUTION_UNTIL').trim(),
   comment: (process.env.BITRIX_SUBSTITUTION_COMMENT_FIELD || 'UF_CRM_SUBSTITUTION_COMMENT').trim()
 };
+const shiftBookingFields = {
+  categoryId: 6,
+  parentDeal: 'UF_CRM_1787843951',
+  startsAt: 'UF_CRM_1787823737',
+  endsAt: 'UF_CRM_1787823806',
+  bookingId: 'UF_CRM_CARE_BOOKING_ID',
+  recipient: 'UF_CRM_CARE_RECIPIENT',
+  executor: 'UF_CRM_CARE_EXECUTOR',
+  resourceId: 'UF_CRM_CARE_RESOURCE_ID'
+};
+const shiftBookingMatchToleranceSeconds = 5 * 60;
+const shiftBookingRetrySeconds = 5 * 60;
+const shiftBookingMaxAgeSeconds = 24 * 60 * 60;
 const calculatorProductIds = {
   hourly_2: 20, hourly_3: 24, hourly_4: 28, hourly_5: 32, hourly_6: 36,
   hourly_7: 40, hourly_8: 44, hourly_9: 48, hourly_10: 52, hourly_11: 56, hourly_12: 60,
@@ -373,6 +386,64 @@ async function bitrixCall(method, payload) {
 }
 
 let dealLinkSyncRunning = false;
+let shiftBookingLinkSyncRunning = false;
+const shiftBookingRetryAfter = new Map();
+let shiftBookingFieldState = { checkedAt: 0, available: false };
+
+function crmEntityId(value) {
+  const raw = Array.isArray(value) ? value[0] : value;
+  const id = Number(String(raw || '').replace(/\D/g, ''));
+  return Number.isInteger(id) && id > 0 ? id : 0;
+}
+
+function crmDateTimestamp(value) {
+  const timestamp = Date.parse(cleanText(value, 100));
+  return Number.isFinite(timestamp) ? Math.floor(timestamp / 1000) : 0;
+}
+
+function bookingRows(result) {
+  if (Array.isArray(result)) return result;
+  return Array.isArray(result?.booking) ? result.booking : [];
+}
+
+function bookingId(booking) {
+  const id = Number(booking?.id ?? booking?.ID ?? booking?.bookingId);
+  return Number.isInteger(id) && id > 0 ? id : 0;
+}
+
+function shiftMatchesBooking(shift, booking) {
+  const shiftStart = crmDateTimestamp(shift?.[shiftBookingFields.startsAt]);
+  const shiftEnd = crmDateTimestamp(shift?.[shiftBookingFields.endsAt]);
+  const bookingStart = Number(booking?.datePeriod?.from?.timestamp) || 0;
+  const bookingEnd = Number(booking?.datePeriod?.to?.timestamp) || 0;
+  if (!shiftStart || !bookingStart) return false;
+  if (Math.abs(shiftStart - bookingStart) === 0) return true;
+  return Boolean(
+    shiftEnd && bookingEnd &&
+    Math.abs(shiftStart - bookingStart) <= shiftBookingMatchToleranceSeconds &&
+    Math.abs(shiftEnd - bookingEnd) <= shiftBookingMatchToleranceSeconds
+  );
+}
+
+function sameShiftSignature(left, right) {
+  return crmEntityId(left?.[shiftBookingFields.parentDeal]) === crmEntityId(right?.[shiftBookingFields.parentDeal]) &&
+    crmEntityId(left?.[shiftBookingFields.recipient]) === crmEntityId(right?.[shiftBookingFields.recipient]) &&
+    crmEntityId(left?.[shiftBookingFields.executor]) === crmEntityId(right?.[shiftBookingFields.executor]) &&
+    crmDateTimestamp(left?.[shiftBookingFields.startsAt]) === crmDateTimestamp(right?.[shiftBookingFields.startsAt]) &&
+    crmDateTimestamp(left?.[shiftBookingFields.endsAt]) === crmDateTimestamp(right?.[shiftBookingFields.endsAt]);
+}
+
+async function hasShiftBookingLinkField() {
+  const now = Date.now();
+  if (now - shiftBookingFieldState.checkedAt < 5 * 60 * 1000) return shiftBookingFieldState.available;
+  const fields = indexedValues(await bitrixCall('crm.deal.userfield.list', { order: { ID: 'ASC' } }));
+  shiftBookingFieldState = {
+    checkedAt: now,
+    available: fields.some(field => field?.FIELD_NAME === shiftBookingFields.bookingId)
+  };
+  if (!shiftBookingFieldState.available) console.warn(`Shift-booking sync is waiting for field ${shiftBookingFields.bookingId}. Reinstall the Participants app.`);
+  return shiftBookingFieldState.available;
+}
 
 // Входящий вебхук портала умеет читать и менять CRM, но не имеет права
 // подписываться на event.bind. Поэтому короткая сверка заменяет недоступное
@@ -400,6 +471,86 @@ async function ensureNewDealLinks() {
     if (updated) console.info(`Deal-link sync updated ${updated} deal(s)`);
   } finally {
     dealLinkSyncRunning = false;
+  }
+}
+
+// Сделки смен создаёт внешний сервис, поэтому сервер проверяет новые сделки
+// коротким опросом. Связь с Онлайн-записью создаётся здесь, в момент появления
+// смены, а экран основной сделки только показывает уже сохранённую связь.
+async function ensureNewShiftBookingLinks() {
+  if (!bitrixWebhookUrl || shiftBookingLinkSyncRunning) return;
+  shiftBookingLinkSyncRunning = true;
+  try {
+    if (!await hasShiftBookingLinkField()) return;
+    const now = Math.floor(Date.now() / 1000);
+    const shifts = indexedValues(await bitrixCall('crm.deal.list', {
+      order: { ID: 'DESC' },
+      filter: { CATEGORY_ID: shiftBookingFields.categoryId },
+      select: [
+        'ID', 'DATE_CREATE', shiftBookingFields.parentDeal, shiftBookingFields.bookingId,
+        shiftBookingFields.startsAt, shiftBookingFields.endsAt,
+        shiftBookingFields.recipient, shiftBookingFields.executor
+      ]
+    }));
+    const parents = new Map();
+    let linked = 0;
+    for (const shift of shifts) {
+      const shiftId = Number(shift?.ID);
+      const createdAt = crmDateTimestamp(shift?.DATE_CREATE);
+      const parentDealId = crmEntityId(shift?.[shiftBookingFields.parentDeal]);
+      if (!Number.isInteger(shiftId) || shiftId <= 0 || !parentDealId || Number(shift?.[shiftBookingFields.bookingId]) > 0) continue;
+      if (!createdAt || now - createdAt > shiftBookingMaxAgeSeconds) continue;
+      if ((shiftBookingRetryAfter.get(shiftId) || 0) > now) continue;
+      if (shifts.filter(other => Number(other?.ID) !== shiftId && !Number(other?.[shiftBookingFields.bookingId]) && sameShiftSignature(shift, other)).length) {
+        shiftBookingRetryAfter.set(shiftId, now + shiftBookingRetrySeconds);
+        continue;
+      }
+      let parent = parents.get(parentDealId);
+      if (!parent) {
+        parent = await bitrixCall('crm.deal.get', { id: parentDealId });
+        parents.set(parentDealId, parent);
+      }
+      const recipientId = crmEntityId(shift?.[shiftBookingFields.recipient]);
+      const executorId = crmEntityId(shift?.[shiftBookingFields.executor]);
+      const resourceId = Number(parent?.[shiftBookingFields.resourceId]);
+      const shiftStart = crmDateTimestamp(shift?.[shiftBookingFields.startsAt]);
+      const shiftEnd = crmDateTimestamp(shift?.[shiftBookingFields.endsAt]) || shiftStart;
+      if (!recipientId || !executorId || !resourceId || !shiftStart ||
+        recipientId !== crmEntityId(parent?.[shiftBookingFields.recipient]) ||
+        executorId !== crmEntityId(parent?.[shiftBookingFields.executor])) {
+        shiftBookingRetryAfter.set(shiftId, now + shiftBookingRetrySeconds);
+        continue;
+      }
+      const result = await bitrixCall('booking.v1.booking.list', {
+        filter: {
+          within: {
+            dateFrom: shiftStart - shiftBookingMatchToleranceSeconds,
+            dateTo: shiftEnd + shiftBookingMatchToleranceSeconds
+          },
+          client: { entities: [{ code: 'CONTACT', module: 'crm', id: String(recipientId) }] }
+        },
+        order: { dateFrom: 'ASC', dateTo: 'ASC' }
+      });
+      const candidates = bookingRows(result)
+        .filter(booking => bookingId(booking) && (booking.resourceIds || []).some(id => Number(id) === resourceId))
+        .filter(booking => shiftMatchesBooking(shift, booking));
+      if (candidates.length !== 1 || shifts.some(other => Number(other?.[shiftBookingFields.bookingId]) === bookingId(candidates[0]))) {
+        shiftBookingRetryAfter.set(shiftId, now + shiftBookingRetrySeconds);
+        continue;
+      }
+      await bitrixCall('crm.deal.update', {
+        id: shiftId,
+        fields: { [shiftBookingFields.bookingId]: bookingId(candidates[0]) }
+      });
+      shiftBookingRetryAfter.delete(shiftId);
+      linked += 1;
+    }
+    for (const [shiftId, retryAfter] of shiftBookingRetryAfter) {
+      if (retryAfter < now - shiftBookingMaxAgeSeconds) shiftBookingRetryAfter.delete(shiftId);
+    }
+    if (linked) console.info(`Shift-booking sync linked ${linked} shift(s)`);
+  } finally {
+    shiftBookingLinkSyncRunning = false;
   }
 }
 
@@ -1292,6 +1443,12 @@ createServer(async (request, response) => {
     ensureNewDealLinks().catch(error => console.error('Deal-link sync failed:', error.message));
   }, 15 * 1000);
   dealLinkTimer.unref();
+
+  ensureNewShiftBookingLinks().catch(error => console.error('Shift-booking sync failed:', error.message));
+  const shiftBookingLinkTimer = setInterval(() => {
+    ensureNewShiftBookingLinks().catch(error => console.error('Shift-booking sync failed:', error.message));
+  }, 15 * 1000);
+  shiftBookingLinkTimer.unref();
 
   // Подписку на ответ менеджера нужно восстанавливать и после обычного
   // перезапуска сайта: данные авторизации приложения сохранены в volume,
