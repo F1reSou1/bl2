@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
 import {
   chooseNextManager,
+  isShiftBookingTimeMatch,
   isSubstitutionActive,
   parseIdList
 } from '../crm-automation.mjs';
@@ -28,10 +29,38 @@ test('substitution remains active through the selected end date', () => {
   assert.equal(isSubstitutionActive('2026-08-20', new Date('2026-08-21T00:00:00')), false);
 });
 
+test('a 15-second test shift is matched by its start without waiting for the booking end', () => {
+  assert.equal(isShiftBookingTimeMatch({
+    shiftStart: 1_000,
+    shiftEnd: 1_015,
+    bookingStart: 1_000,
+    bookingEnd: 29_800
+  }), true);
+});
+
+test('a shift started during its scheduled booking is a time candidate', () => {
+  assert.equal(isShiftBookingTimeMatch({
+    shiftStart: 2_800,
+    shiftEnd: 2_800,
+    bookingStart: 1_000,
+    bookingEnd: 29_800
+  }), true);
+});
+
+test('an unrelated shift outside the booking window is rejected', () => {
+  assert.equal(isShiftBookingTimeMatch({
+    shiftStart: 40_000,
+    shiftEnd: 40_015,
+    bookingStart: 1_000,
+    bookingEnd: 29_800
+  }), false);
+});
+
 test('server and deal widget contain required integration calls', async () => {
-  const [server, widget] = await Promise.all([
+  const [server, widget, installer] = await Promise.all([
     readFile(new URL('../server.mjs', import.meta.url), 'utf8'),
-    readFile(new URL('../bitrix-participants.html', import.meta.url), 'utf8')
+    readFile(new URL('../bitrix-participants.html', import.meta.url), 'utf8'),
+    readFile(new URL('../bitrix-participants-install.html', import.meta.url), 'utf8')
   ]);
   for (const method of ['ASSIGNED_BY_ID', 'COMMENTS', 'sitters.blizkie-vl.ru/deals/${dealId}']) {
     assert.ok(server.includes(method), `server must use ${method}`);
@@ -39,6 +68,9 @@ test('server and deal widget contain required integration calls', async () => {
   assert.match(server, /ensureNewDealLinks/);
   assert.match(server, /ensureNewShiftBookingLinks/);
   assert.match(server, /booking\.v1\.booking\.list/);
+  assert.match(server, /booking\.v1\.booking\.externalData\.list/);
+  assert.match(server, /UF_CRM_CARE_BOOKING_MANUAL/);
+  assert.match(installer, /CARE_BOOKING_MANUAL/);
   assert.match(server, /CATEGORY_ID: 2, STAGE_ID: 'C2:NEW'/);
   for (const method of ['crm.timeline.comment.add', 'booking.v1.resource.add', 'booking.v1.resource.update', 'booking.v1.resource.slots.set', 'booking.v1.booking.add', 'booking.v1.booking.list', 'booking.v1.booking.client.set', 'booking.v1.booking.externalData.set']) {
     assert.ok(widget.includes(method), `widget must use ${method}`);
@@ -69,6 +101,7 @@ test('server and deal widget contain required integration calls', async () => {
   assert.match(widget, /UF_CRM_1787843951/);
   assert.match(widget, /UF_CRM_1787823737/);
   assert.match(widget, /UF_CRM_CARE_BOOKING_ID/);
+  assert.match(widget, /UF_CRM_CARE_BOOKING_MANUAL/);
   assert.match(widget, /loadShiftLinks/);
   assert.match(widget, /schedule-item-link/);
   assert.match(widget, /crm\/deal\/details\/\$\{Number\(id\)\}/);
@@ -86,6 +119,9 @@ test('server and deal widget contain required integration calls', async () => {
   assert.match(widget, /scheduleCacheTtl = 60 \* 1000/);
   assert.match(widget, /refreshSchedule/);
   assert.match(widget, /Связанные смены отмечены в строках записей/);
+  assert.match(widget, /Спорные смены/);
+  assert.match(widget, /data-unlink-shift-id/);
+  assert.match(widget, /booking\.v1\.booking\.externalData\.list/);
   assert.match(widget, /filter: \{ name \}/);
   assert.match(widget, /Ошибка: каталог ресурсов недоступен\./);
   assert.match(widget, /Готово: контакт назначен\./);

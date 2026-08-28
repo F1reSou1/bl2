@@ -38,6 +38,15 @@
     .booking-create-grid .full { grid-column: 1 / -1; }
     .booking-target { min-height: 20px; margin: 4px 0 12px; color: #075c52; font-weight: 600; }
     .booking-actions { display: flex; justify-content: flex-end; margin-top: 16px; }
+    .manual-shift-bar { margin-top: 16px; padding: 14px 16px; border: 1px solid #f0d9a8; border-radius: 14px; background: #fffaf0; }
+    .manual-shift-bar-header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+    .manual-shift-bar h2 { margin: 0; font-size: 16px; color: #795b18; }
+    .manual-shift-bar p { margin: 4px 0 0; color: #756849; font-size: 13px; }
+    .manual-shift-list { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+    .manual-shift-chip { max-width: 100%; background: #f4e4bd; color: #654c16; text-align: left; }
+    .manual-shift-empty { margin-top: 8px; color: #756849; font-size: 13px; }
+    .manual-shift-status { color: #795b18; font-size: 13px; }
+    .manual-shift-status.error { color: #a22d2d; }
     .booking-schedule { margin-top: 16px; padding: 16px; border: 1px solid #d7e8e2; border-radius: 14px; background: #fff; }
     .booking-schedule-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
     .booking-schedule h2 { margin: 0; font-size: 17px; }
@@ -50,6 +59,9 @@
     .schedule-item-name { font-weight: 600; }
     .schedule-item-link { color: #087465; font-size: 13px; font-weight: 600; white-space: nowrap; text-decoration: none; }
     .schedule-item-link:hover { text-decoration: underline; }
+    .schedule-item-shift { display: inline-flex; align-items: center; gap: 5px; }
+    .schedule-unlink { display: inline-grid; width: 22px; height: 22px; padding: 0; place-items: center; border-radius: 50%; background: #fbe9e9; color: #a22d2d; font-size: 16px; line-height: 1; }
+    .schedule-unlink:hover { background: #f6d4d4; }
     .schedule-empty { margin: 0; padding: 10px 0; color: #61717b; }
     .schedule-footer { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 14px; }
     .service-screen { max-width: 1200px; }
@@ -70,6 +82,11 @@
     .search-results { margin-top: 12px; max-height: 160px; overflow: auto; }
     .result { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 9px 0; border-top: 1px solid #edf1f0; }
     .result small { display: block; color: #75838d; }
+    .booking-choice { display: grid; width: 100%; grid-template-columns: 112px minmax(0, 1fr); gap: 10px; margin-top: 8px; padding: 11px 12px; border: 1px solid #d7e8e2; background: #f7faf9; color: #24333f; text-align: left; }
+    .booking-choice:hover { border-color: #0a7164; background: #edf8f4; }
+    .booking-choice:disabled { cursor: not-allowed; opacity: .55; }
+    .booking-choice-time { color: #087465; font-weight: 700; }
+    .booking-choice small { display: block; margin-top: 2px; color: #75838d; }
     .dialog-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 20px; }
     @media (max-width: 700px) { .roles, .booking-create-grid, .schedule-item { grid-template-columns: 1fr; } .booking-create-grid .full { grid-column: auto; } .schedule-item { gap: 3px; } }
   </style>
@@ -116,6 +133,16 @@
           <div id="booking-target" class="booking-target">Подопечный и сиделка загружаются…</div>
           <div class="booking-actions"><button type="submit" id="create-booking-button">Создать запись</button></div>
         </form>
+      </section>
+      <section class="manual-shift-bar" aria-labelledby="manual-shift-title">
+        <div class="manual-shift-bar-header">
+          <div>
+            <h2 id="manual-shift-title">Спорные смены</h2>
+            <p>Выберите непривязанную смену и укажите для неё запись вручную.</p>
+          </div>
+          <span id="manual-shift-status" class="manual-shift-status" aria-live="polite"></span>
+        </div>
+        <div id="manual-shift-list" class="manual-shift-list"><span class="manual-shift-empty">Смены загружаются…</span></div>
       </section>
       <section class="booking-schedule">
         <div class="booking-schedule-header"><h2>Расписание</h2><button type="button" class="secondary" id="refresh-schedule-button">Обновить</button></div>
@@ -177,6 +204,17 @@
     </form>
   </dialog>
 
+  <dialog id="shift-link-dialog">
+    <form class="dialog" method="dialog">
+      <h2 id="shift-link-title">Связать смену с записью</h2>
+      <p id="shift-link-description">Выберите конкретную запись из расписания.</p>
+      <div id="shift-booking-options"></div>
+      <div class="dialog-actions">
+        <button type="button" class="secondary" id="shift-link-cancel">Отмена</button>
+      </div>
+    </form>
+  </dialog>
+
   <script src="https://unpkg.com/@bitrix24/b24jssdk@1/dist/umd/index.min.js"></script>
   <script>
     (async () => {
@@ -207,6 +245,11 @@
       const createBookingButton = document.getElementById('create-booking-button');
       const scheduleNode = document.getElementById('booking-schedule');
       const refreshScheduleButton = document.getElementById('refresh-schedule-button');
+      const manualShiftList = document.getElementById('manual-shift-list');
+      const manualShiftStatus = document.getElementById('manual-shift-status');
+      const shiftLinkDialog = document.getElementById('shift-link-dialog');
+      const shiftLinkTitle = document.getElementById('shift-link-title');
+      const shiftBookingOptions = document.getElementById('shift-booking-options');
       const appTabs = [...document.querySelectorAll('[data-app-tab]')];
       const participantsPanel = document.getElementById('participants-panel');
       const schedulePanel = document.getElementById('schedule-panel');
@@ -223,6 +266,7 @@
         startsAt: 'UF_CRM_1787823737',
         endsAt: 'UF_CRM_1787823806',
         bookingId: 'UF_CRM_CARE_BOOKING_ID',
+        manualLock: 'UF_CRM_CARE_BOOKING_MANUAL',
         recipient: 'UF_CRM_CARE_RECIPIENT',
         executor: 'UF_CRM_CARE_EXECUTOR'
       };
@@ -235,6 +279,9 @@
       let employees = [];
       let activeAppTab = 'participants';
       let scheduleLoaded = false;
+      let currentScheduleBookings = [];
+      let currentShiftDeals = [];
+      let activeShiftForLink = null;
       const participantsScreen = document.getElementById('participants-screen');
       const serviceScreen = document.getElementById('service-screen');
       const serviceFrame = document.getElementById('service-frame');
@@ -249,23 +296,18 @@
       function readScheduleCache(recipientId, resourceId) {
         try {
           const cached = JSON.parse(sessionStorage.getItem(scheduleCacheKey(recipientId, resourceId)) || 'null');
-          if (!cached || !Array.isArray(cached.bookings) || !Array.isArray(cached.links) || Number(cached.expiresAt) <= Date.now()) return null;
+          if (!cached || !Array.isArray(cached.bookings) || Number(cached.expiresAt) <= Date.now()) return null;
           return cached;
         } catch (error) {
           return null;
         }
       }
 
-      function writeScheduleCache(recipientId, resourceId, bookings, linksByBooking) {
+      function writeScheduleCache(recipientId, resourceId, bookings) {
         try {
-          const links = [...linksByBooking.entries()].map(([bookingId, link]) => ({
-            bookingId,
-            shiftId: Number(link?.shift?.ID)
-          })).filter(link => link.bookingId && link.shiftId);
           sessionStorage.setItem(scheduleCacheKey(recipientId, resourceId), JSON.stringify({
             expiresAt: Date.now() + scheduleCacheTtl,
-            bookings,
-            links
+            bookings
           }));
         } catch (error) {
           console.warn('Не удалось сохранить кэш расписания:', error);
@@ -275,12 +317,6 @@
       function removeScheduleCache(recipientId, resourceId) {
         try { sessionStorage.removeItem(scheduleCacheKey(recipientId, resourceId)); }
         catch (error) { console.warn('Не удалось очистить кэш расписания:', error); }
-      }
-
-      function linksFromCache(links) {
-        return new Map((Array.isArray(links) ? links : []).map(link => [Number(link.bookingId), {
-          shift: { ID: Number(link.shiftId) }
-        }]));
       }
 
       function setAppTab(tabName) {
@@ -727,20 +763,131 @@
         return Array.isArray(result?.result) ? result.result : [];
       }
 
-      async function loadShiftLinks(bookings) {
-        if (!bookings.length || !dealId) return new Map();
+      async function loadShiftLinks() {
+        if (!dealId) return new Map();
         const result = await call('crm.deal.list', {
           order: { ID: 'ASC' },
           filter: { CATEGORY_ID: shiftLinkFields.categoryId, [shiftLinkFields.parentDeal]: String(dealId) },
-          select: ['ID', 'TITLE', shiftLinkFields.bookingId]
+          select: ['ID', 'TITLE', shiftLinkFields.startsAt, shiftLinkFields.endsAt, shiftLinkFields.bookingId, shiftLinkFields.manualLock]
         });
-        const shifts = dealList(result);
+        currentShiftDeals = dealList(result);
         const linkedByBooking = new Map();
-        for (const shift of shifts) {
+        for (const shift of currentShiftDeals) {
           const linkedBookingId = Number(shift?.[shiftLinkFields.bookingId]);
           if (linkedBookingId > 0) linkedByBooking.set(linkedBookingId, { shift, confidence: 'saved' });
         }
+        renderManualShiftBar();
         return linkedByBooking;
+      }
+
+      function shiftDisplayName(shift) {
+        return String(shift?.TITLE || `Смена №${Number(shift?.ID)}`).trim();
+      }
+
+      function setManualShiftStatus(message = '', isError = false) {
+        manualShiftStatus.textContent = message;
+        manualShiftStatus.classList.toggle('error', Boolean(isError));
+      }
+
+      function renderManualShiftBar() {
+        const unlinked = currentShiftDeals.filter(shift => Number(shift?.[shiftLinkFields.bookingId]) <= 0);
+        if (!unlinked.length) {
+          manualShiftList.innerHTML = '<span class="manual-shift-empty">Непривязанных смен нет.</span>';
+          return;
+        }
+        manualShiftList.innerHTML = unlinked.map(shift =>
+          `<button type="button" class="manual-shift-chip" data-manual-shift-id="${Number(shift.ID)}">${escapeHtml(shiftDisplayName(shift))}</button>`
+        ).join('');
+      }
+
+      function bookingChoiceLabel(booking) {
+        const from = booking?.datePeriod?.from || {};
+        const to = booking?.datePeriod?.to || {};
+        const timezone = from.timezone || to.timezone || 'Asia/Vladivostok';
+        return {
+          day: formatBookingDay(from.timestamp, timezone),
+          time: `${formatBookingTime(from.timestamp, timezone)}–${formatBookingTime(to.timestamp, timezone)}`,
+          name: booking.name || 'Без названия'
+        };
+      }
+
+      function openShiftLinkDialog(shiftId) {
+        activeShiftForLink = currentShiftDeals.find(shift => Number(shift.ID) === Number(shiftId)) || null;
+        if (!activeShiftForLink) return;
+        shiftLinkTitle.textContent = shiftDisplayName(activeShiftForLink);
+        const usedBookings = new Map(currentShiftDeals
+          .filter(shift => Number(shift?.[shiftLinkFields.bookingId]) > 0)
+          .map(shift => [Number(shift[shiftLinkFields.bookingId]), shift]));
+        if (!currentScheduleBookings.length) {
+          shiftBookingOptions.innerHTML = '<p class="schedule-empty">В расписании нет доступных записей.</p>';
+        } else {
+          shiftBookingOptions.innerHTML = currentScheduleBookings.map(booking => {
+            const id = bookingId(booking);
+            const label = bookingChoiceLabel(booking);
+            const usedBy = usedBookings.get(id);
+            const note = usedBy ? `Уже связана: ${shiftDisplayName(usedBy)}` : `Запись №${id}`;
+            return `<button type="button" class="booking-choice" data-link-booking-id="${id}" ${usedBy ? 'disabled' : ''}><span class="booking-choice-time">${escapeHtml(label.time)}</span><span>${escapeHtml(label.name)}<small>${escapeHtml(label.day)} · ${escapeHtml(note)}</small></span></button>`;
+          }).join('');
+        }
+        shiftLinkDialog.showModal();
+      }
+
+      function bookingExternalData(result) {
+        if (Array.isArray(result)) return result;
+        return Array.isArray(result?.externalData) ? result.externalData : [];
+      }
+
+      async function ensureBookingParentLink(selectedBookingId) {
+        const result = await call('booking.v1.booking.externalData.list', { bookingId: selectedBookingId });
+        const links = bookingExternalData(result);
+        const hasParent = links.some(item => String(item?.moduleId).toLowerCase() === 'crm' && String(item?.entityTypeId).toUpperCase() === 'DEAL' && Number(item?.value) === dealId);
+        if (hasParent) return;
+        await call('booking.v1.booking.externalData.set', {
+          bookingId: selectedBookingId,
+          externalData: [...links, { moduleId: 'crm', entityTypeId: 'DEAL', value: String(dealId) }]
+        });
+      }
+
+      async function linkShiftToBooking(selectedBookingId) {
+        if (!activeShiftForLink || !selectedBookingId) return;
+        shiftBookingOptions.querySelectorAll('button').forEach(button => { button.disabled = true; });
+        try {
+          await ensureBookingParentLink(selectedBookingId);
+          await call('crm.deal.update', {
+            id: Number(activeShiftForLink.ID),
+            fields: {
+              [shiftLinkFields.bookingId]: Number(selectedBookingId),
+              [shiftLinkFields.manualLock]: 1
+            }
+          });
+          const title = shiftDisplayName(activeShiftForLink);
+          shiftLinkDialog.close();
+          setManualShiftStatus(`${title} связана с записью №${selectedBookingId}.`);
+          scheduleLoaded = false;
+          await refreshSchedule();
+        } catch (error) {
+          setManualShiftStatus(`Не удалось сохранить связь: ${friendlyError(error)}`, true);
+          shiftBookingOptions.querySelectorAll('button').forEach(button => { button.disabled = false; });
+        }
+      }
+
+      async function unlinkShift(shiftId) {
+        const shift = currentShiftDeals.find(item => Number(item.ID) === Number(shiftId));
+        if (!shift || !window.confirm(`Снять связь «${shiftDisplayName(shift)}» с записью?`)) return;
+        try {
+          await call('crm.deal.update', {
+            id: Number(shift.ID),
+            fields: {
+              [shiftLinkFields.bookingId]: '',
+              [shiftLinkFields.manualLock]: 1
+            }
+          });
+          setManualShiftStatus('Связь снята. Теперь для смены можно выбрать другую запись.');
+          scheduleLoaded = false;
+          await refreshSchedule();
+        } catch (error) {
+          setManualShiftStatus(`Не удалось снять связь: ${friendlyError(error)}`, true);
+        }
       }
 
       function renderSchedule(bookings, message = '', linksByBooking = new Map()) {
@@ -768,7 +915,7 @@
             const timezone = from.timezone || to.timezone || group.timezone;
             const link = linksByBooking.get(bookingId(booking));
             const shiftUrl = link ? dealUrl(link.shift.ID) : '';
-            const shiftLink = shiftUrl ? `<a class="schedule-item-link" href="${escapeHtml(shiftUrl)}" target="_blank" rel="noopener">Смена №${escapeHtml(link.shift.ID)}</a>` : '';
+            const shiftLink = shiftUrl ? `<span class="schedule-item-shift"><a class="schedule-item-link" href="${escapeHtml(shiftUrl)}" target="_blank" rel="noopener">Смена №${escapeHtml(link.shift.ID)}</a><button type="button" class="schedule-unlink" data-unlink-shift-id="${Number(link.shift.ID)}" title="Снять связь" aria-label="Снять связь со сменой №${Number(link.shift.ID)}">×</button></span>` : '';
             return `<div class="schedule-item"><div class="schedule-item-time">${escapeHtml(formatBookingTime(from.timestamp, timezone))}–${escapeHtml(formatBookingTime(to.timestamp, timezone))}</div><div class="schedule-item-name">${escapeHtml(booking.name || 'Без названия')}</div>${shiftLink}</div>`;
           }).join('');
           return `<section class="schedule-day"><h3>${escapeHtml(formatBookingDay(group.timestamp, group.timezone))}</h3>${items}</section>`;
@@ -779,17 +926,12 @@
         const recipient = contactsByRole.recipient;
         const resourceId = Number(deal?.[substitutionFields.resourceId]);
         if (!recipient || !resourceId) {
+          currentScheduleBookings = [];
+          currentShiftDeals = [];
+          renderManualShiftBar();
           renderSchedule([], 'Назначьте подопечного и сиделку — тогда здесь появится расписание.');
           scheduleLoaded = true;
           return;
-        }
-        if (!force) {
-          const cached = readScheduleCache(recipient.ID, resourceId);
-          if (cached) {
-            renderSchedule(cached.bookings, '', linksFromCache(cached.links));
-            scheduleLoaded = true;
-            return;
-          }
         }
         const timezone = 'Asia/Vladivostok';
         const today = bookingDateParts(Math.floor(Date.now() / 1000), timezone);
@@ -798,19 +940,25 @@
         scheduleNode.innerHTML = '<p class="schedule-empty">Загружаю расписание…</p>';
         refreshScheduleButton.disabled = true;
         try {
-          const result = await call('booking.v1.booking.list', {
-            filter: {
-              within: { dateFrom, dateTo },
-              client: { entities: [{ code: 'CONTACT', module: 'crm', id: String(recipient.ID) }] }
-            },
-            order: { dateFrom: 'ASC', dateTo: 'ASC' }
-          });
-          const bookings = scheduleBookings(result)
-            .filter(booking => (booking.resourceIds || []).some(id => Number(id) === resourceId))
-            .sort((left, right) => Number(left?.datePeriod?.from?.timestamp) - Number(right?.datePeriod?.from?.timestamp));
-          const linksByBooking = await loadShiftLinks(bookings);
-          writeScheduleCache(recipient.ID, resourceId, bookings, linksByBooking);
-          renderSchedule(bookings, '', linksByBooking);
+          const cached = force ? null : readScheduleCache(recipient.ID, resourceId);
+          if (cached) {
+            currentScheduleBookings = cached.bookings;
+          } else {
+            const result = await call('booking.v1.booking.list', {
+              filter: {
+                within: { dateFrom, dateTo },
+                client: { entities: [{ code: 'CONTACT', module: 'crm', id: String(recipient.ID) }] }
+              },
+              order: { dateFrom: 'ASC', dateTo: 'ASC' }
+            });
+            currentScheduleBookings = scheduleBookings(result)
+              .filter(booking => (booking.resourceIds || []).some(id => Number(id) === resourceId))
+              .sort((left, right) => Number(left?.datePeriod?.from?.timestamp) - Number(right?.datePeriod?.from?.timestamp));
+            writeScheduleCache(recipient.ID, resourceId, currentScheduleBookings);
+          }
+          // Записи можно кэшировать, но связи со сменами всегда читаем свежими.
+          const linksByBooking = await loadShiftLinks();
+          renderSchedule(currentScheduleBookings, '', linksByBooking);
         } catch (error) {
           console.warn('Не удалось загрузить расписание:', error);
           renderSchedule([], 'Не удалось загрузить расписание. Попробуйте обновить ещё раз.');
@@ -933,6 +1081,19 @@
       document.getElementById('back-to-participants-button').addEventListener('click', returnToParticipants);
       appTabs.forEach(tab => tab.addEventListener('click', () => setAppTab(tab.dataset.appTab)));
       refreshScheduleButton.addEventListener('click', () => refreshSchedule({ force: true }));
+      manualShiftList.addEventListener('click', event => {
+        const button = event.target.closest('[data-manual-shift-id]');
+        if (button) openShiftLinkDialog(button.dataset.manualShiftId);
+      });
+      scheduleNode.addEventListener('click', event => {
+        const button = event.target.closest('[data-unlink-shift-id]');
+        if (button) unlinkShift(button.dataset.unlinkShiftId);
+      });
+      shiftBookingOptions.addEventListener('click', event => {
+        const button = event.target.closest('[data-link-booking-id]');
+        if (button && !button.disabled) linkShiftToBooking(Number(button.dataset.linkBookingId));
+      });
+      document.getElementById('shift-link-cancel').addEventListener('click', () => shiftLinkDialog.close());
 
       bookingForm.addEventListener('submit', async event => {
         event.preventDefault();

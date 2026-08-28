@@ -3,7 +3,7 @@ import { randomBytes } from 'node:crypto';
 import { createServer } from 'node:http';
 import { dirname, extname, join, normalize, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { chooseNextManager, isSubstitutionActive, parseIdList } from './crm-automation.mjs';
+import { chooseNextManager, isShiftBookingTimeMatch, isSubstitutionActive, parseIdList } from './crm-automation.mjs';
 
 const siteRoot = resolve(fileURLToPath(new URL('.', import.meta.url)));
 const port = Number(process.env.PORT || 80);
@@ -54,13 +54,14 @@ const shiftBookingFields = {
   startsAt: 'UF_CRM_1787823737',
   endsAt: 'UF_CRM_1787823806',
   bookingId: 'UF_CRM_CARE_BOOKING_ID',
+  manualLock: 'UF_CRM_CARE_BOOKING_MANUAL',
   recipient: 'UF_CRM_CARE_RECIPIENT',
   executor: 'UF_CRM_CARE_EXECUTOR',
   resourceId: 'UF_CRM_CARE_RESOURCE_ID'
 };
 const shiftBookingMatchToleranceSeconds = 5 * 60;
-const shiftBookingRetrySeconds = 5 * 60;
-const shiftBookingMaxAgeSeconds = 24 * 60 * 60;
+const shiftBookingRetrySeconds = 15;
+const shiftBookingMaxAgeSeconds = 7 * 24 * 60 * 60;
 const calculatorProductIds = {
   hourly_2: 20, hourly_3: 24, hourly_4: 28, hourly_5: 32, hourly_6: 36,
   hourly_7: 40, hourly_8: 44, hourly_9: 48, hourly_10: 52, hourly_11: 56, hourly_12: 60,
@@ -385,10 +386,27 @@ async function bitrixCall(method, payload) {
   return body.result;
 }
 
+async function bitrixListAll(method, payload, maxPages = 20) {
+  const rows = [];
+  for (let page = 0; page < maxPages; page += 1) {
+    const batch = indexedValues(await bitrixCall(method, { ...payload, start: page * 50 }));
+    rows.push(...batch);
+    if (batch.length < 50) break;
+  }
+  return rows;
+}
+
 let dealLinkSyncRunning = false;
 let shiftBookingLinkSyncRunning = false;
 const shiftBookingRetryAfter = new Map();
 let shiftBookingFieldState = { checkedAt: 0, available: false };
+
+function deferShiftBookingLink(shiftId, now) {
+  const previous = shiftBookingRetryAfter.get(shiftId);
+  const attempts = Number(previous?.attempts || 0) + 1;
+  const delay = attempts <= 4 ? shiftBookingRetrySeconds : attempts <= 12 ? 5 * 60 : 60 * 60;
+  shiftBookingRetryAfter.set(shiftId, { after: now + delay, attempts });
+}
 
 function crmEntityId(value) {
   const raw = Array.isArray(value) ? value[0] : value;
@@ -416,13 +434,42 @@ function shiftMatchesBooking(shift, booking) {
   const shiftEnd = crmDateTimestamp(shift?.[shiftBookingFields.endsAt]);
   const bookingStart = Number(booking?.datePeriod?.from?.timestamp) || 0;
   const bookingEnd = Number(booking?.datePeriod?.to?.timestamp) || 0;
-  if (!shiftStart || !bookingStart) return false;
-  if (Math.abs(shiftStart - bookingStart) === 0) return true;
-  return Boolean(
-    shiftEnd && bookingEnd &&
-    Math.abs(shiftStart - bookingStart) <= shiftBookingMatchToleranceSeconds &&
-    Math.abs(shiftEnd - bookingEnd) <= shiftBookingMatchToleranceSeconds
+  return isShiftBookingTimeMatch({
+    shiftStart,
+    shiftEnd,
+    bookingStart,
+    bookingEnd,
+    toleranceSeconds: shiftBookingMatchToleranceSeconds
+  });
+}
+
+function externalDataRows(result) {
+  if (Array.isArray(result)) return result;
+  return Array.isArray(result?.externalData) ? result.externalData : [];
+}
+
+async function bookingBelongsToParent(bookingIdValue, parentDealId, cache) {
+  if (!cache.has(bookingIdValue)) {
+    const result = await bitrixCall('booking.v1.booking.externalData.list', { bookingId: bookingIdValue });
+    cache.set(bookingIdValue, externalDataRows(result));
+  }
+  return cache.get(bookingIdValue).some(item =>
+    String(item?.moduleId).toLowerCase() === 'crm' &&
+    String(item?.entityTypeId).toUpperCase() === 'DEAL' &&
+    Number(item?.value) === Number(parentDealId)
   );
+}
+
+async function bookingAlreadyLinked(bookingIdValue, excludedShiftId) {
+  const linked = indexedValues(await bitrixCall('crm.deal.list', {
+    order: { ID: 'DESC' },
+    filter: {
+      CATEGORY_ID: shiftBookingFields.categoryId,
+      [shiftBookingFields.bookingId]: bookingIdValue
+    },
+    select: ['ID', shiftBookingFields.bookingId]
+  }));
+  return linked.some(shift => Number(shift?.ID) !== Number(excludedShiftId));
 }
 
 function sameShiftSignature(left, right) {
@@ -440,9 +487,10 @@ async function hasShiftBookingLinkField() {
   const fields = indexedValues(await bitrixCall('crm.deal.userfield.list', { order: { ID: 'ASC' } }));
   shiftBookingFieldState = {
     checkedAt: now,
-    available: fields.some(field => field?.FIELD_NAME === shiftBookingFields.bookingId)
+    available: [shiftBookingFields.bookingId, shiftBookingFields.manualLock]
+      .every(name => fields.some(field => field?.FIELD_NAME === name))
   };
-  if (!shiftBookingFieldState.available) console.warn(`Shift-booking sync is waiting for field ${shiftBookingFields.bookingId}. Reinstall the Participants app.`);
+  if (!shiftBookingFieldState.available) console.warn('Shift-booking sync is waiting for its technical fields. Reinstall the Participants app.');
   return shiftBookingFieldState.available;
 }
 
@@ -484,26 +532,34 @@ async function ensureNewShiftBookingLinks() {
   try {
     if (!await hasShiftBookingLinkField()) return;
     const now = Math.floor(Date.now() / 1000);
-    const shifts = indexedValues(await bitrixCall('crm.deal.list', {
+    const shifts = await bitrixListAll('crm.deal.list', {
       order: { ID: 'DESC' },
-      filter: { CATEGORY_ID: shiftBookingFields.categoryId },
+      filter: {
+        CATEGORY_ID: shiftBookingFields.categoryId,
+        [shiftBookingFields.bookingId]: false,
+        [shiftBookingFields.manualLock]: false,
+        '>=DATE_CREATE': new Date((now - shiftBookingMaxAgeSeconds) * 1000).toISOString()
+      },
       select: [
-        'ID', 'DATE_CREATE', shiftBookingFields.parentDeal, shiftBookingFields.bookingId,
+        'ID', 'TITLE', 'DATE_CREATE', shiftBookingFields.parentDeal, shiftBookingFields.bookingId,
+        shiftBookingFields.manualLock,
         shiftBookingFields.startsAt, shiftBookingFields.endsAt,
         shiftBookingFields.recipient, shiftBookingFields.executor
       ]
-    }));
+    });
     const parents = new Map();
+    const bookingExternalData = new Map();
     let linked = 0;
     for (const shift of shifts) {
       const shiftId = Number(shift?.ID);
       const createdAt = crmDateTimestamp(shift?.DATE_CREATE);
       const parentDealId = crmEntityId(shift?.[shiftBookingFields.parentDeal]);
-      if (!Number.isInteger(shiftId) || shiftId <= 0 || !parentDealId || Number(shift?.[shiftBookingFields.bookingId]) > 0) continue;
+      if (!Number.isInteger(shiftId) || shiftId <= 0 || !parentDealId ||
+        Number(shift?.[shiftBookingFields.bookingId]) > 0 || Number(shift?.[shiftBookingFields.manualLock]) > 0) continue;
       if (!createdAt || now - createdAt > shiftBookingMaxAgeSeconds) continue;
-      if ((shiftBookingRetryAfter.get(shiftId) || 0) > now) continue;
+      if (Number(shiftBookingRetryAfter.get(shiftId)?.after || 0) > now) continue;
       if (shifts.filter(other => Number(other?.ID) !== shiftId && !Number(other?.[shiftBookingFields.bookingId]) && sameShiftSignature(shift, other)).length) {
-        shiftBookingRetryAfter.set(shiftId, now + shiftBookingRetrySeconds);
+        deferShiftBookingLink(shiftId, now);
         continue;
       }
       let parent = parents.get(parentDealId);
@@ -511,15 +567,17 @@ async function ensureNewShiftBookingLinks() {
         parent = await bitrixCall('crm.deal.get', { id: parentDealId });
         parents.set(parentDealId, parent);
       }
-      const recipientId = crmEntityId(shift?.[shiftBookingFields.recipient]);
-      const executorId = crmEntityId(shift?.[shiftBookingFields.executor]);
+      const recipientId = crmEntityId(parent?.[shiftBookingFields.recipient]);
+      const executorId = crmEntityId(parent?.[shiftBookingFields.executor]);
+      const shiftRecipientId = crmEntityId(shift?.[shiftBookingFields.recipient]);
+      const shiftExecutorId = crmEntityId(shift?.[shiftBookingFields.executor]);
       const resourceId = Number(parent?.[shiftBookingFields.resourceId]);
       const shiftStart = crmDateTimestamp(shift?.[shiftBookingFields.startsAt]);
       const shiftEnd = crmDateTimestamp(shift?.[shiftBookingFields.endsAt]) || shiftStart;
       if (!recipientId || !executorId || !resourceId || !shiftStart ||
-        recipientId !== crmEntityId(parent?.[shiftBookingFields.recipient]) ||
-        executorId !== crmEntityId(parent?.[shiftBookingFields.executor])) {
-        shiftBookingRetryAfter.set(shiftId, now + shiftBookingRetrySeconds);
+        (shiftRecipientId && shiftRecipientId !== recipientId) ||
+        (shiftExecutorId && shiftExecutorId !== executorId)) {
+        deferShiftBookingLink(shiftId, now);
         continue;
       }
       const result = await bitrixCall('booking.v1.booking.list', {
@@ -532,11 +590,15 @@ async function ensureNewShiftBookingLinks() {
         },
         order: { dateFrom: 'ASC', dateTo: 'ASC' }
       });
-      const candidates = bookingRows(result)
+      const timeCandidates = bookingRows(result)
         .filter(booking => bookingId(booking) && (booking.resourceIds || []).some(id => Number(id) === resourceId))
         .filter(booking => shiftMatchesBooking(shift, booking));
-      if (candidates.length !== 1 || shifts.some(other => Number(other?.[shiftBookingFields.bookingId]) === bookingId(candidates[0]))) {
-        shiftBookingRetryAfter.set(shiftId, now + shiftBookingRetrySeconds);
+      const candidates = [];
+      for (const booking of timeCandidates) {
+        if (await bookingBelongsToParent(bookingId(booking), parentDealId, bookingExternalData)) candidates.push(booking);
+      }
+      if (candidates.length !== 1 || await bookingAlreadyLinked(bookingId(candidates[0]), shiftId)) {
+        deferShiftBookingLink(shiftId, now);
         continue;
       }
       await bitrixCall('crm.deal.update', {
@@ -546,8 +608,8 @@ async function ensureNewShiftBookingLinks() {
       shiftBookingRetryAfter.delete(shiftId);
       linked += 1;
     }
-    for (const [shiftId, retryAfter] of shiftBookingRetryAfter) {
-      if (retryAfter < now - shiftBookingMaxAgeSeconds) shiftBookingRetryAfter.delete(shiftId);
+    for (const [shiftId, retryState] of shiftBookingRetryAfter) {
+      if (Number(retryState?.after || 0) < now - shiftBookingMaxAgeSeconds) shiftBookingRetryAfter.delete(shiftId);
     }
     if (linked) console.info(`Shift-booking sync linked ${linked} shift(s)`);
   } finally {

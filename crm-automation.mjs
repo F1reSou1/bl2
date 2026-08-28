@@ -24,3 +24,28 @@ export function isSubstitutionActive(until, now = new Date()) {
     : new Date(until);
   return Number.isFinite(value.getTime()) && value.getTime() >= now.getTime();
 }
+
+export function isShiftBookingTimeMatch({
+  shiftStart,
+  shiftEnd,
+  bookingStart,
+  bookingEnd,
+  toleranceSeconds = 5 * 60
+}) {
+  const start = Number(shiftStart) || 0;
+  const end = Number(shiftEnd) || start;
+  const scheduledStart = Number(bookingStart) || 0;
+  const scheduledEnd = Number(bookingEnd) || 0;
+  if (!start || !scheduledStart) return false;
+
+  // At the moment the caregiver starts a shift its real end is unknown.
+  // A short 15-second test shift must therefore be linkable by its start.
+  if (Math.abs(start - scheduledStart) <= toleranceSeconds) return true;
+  if (scheduledEnd && start >= scheduledStart - toleranceSeconds && start <= scheduledEnd + toleranceSeconds) return true;
+
+  return Boolean(
+    end && scheduledEnd &&
+    Math.abs(start - scheduledStart) <= toleranceSeconds &&
+    Math.abs(end - scheduledEnd) <= toleranceSeconds
+  );
+}
