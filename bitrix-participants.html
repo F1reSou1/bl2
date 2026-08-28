@@ -12,6 +12,10 @@
     main { max-width: 940px; margin: 0 auto; padding: 24px; }
     h1 { margin: 0; font-size: 23px; color: #0a7164; }
     .hint { margin: 6px 0 20px; color: #60707d; }
+    .app-tabs { display: flex; gap: 6px; margin: 0 0 18px; border-bottom: 1px solid #d7e8e2; }
+    .app-tab { margin: 0 0 -1px; padding: 10px 14px; border: 0; border-bottom: 2px solid transparent; border-radius: 8px 8px 0 0; background: transparent; color: #61717b; font-weight: 600; }
+    .app-tab:hover { background: #eef7f4; }
+    .app-tab[aria-selected="true"] { border-bottom-color: #087465; background: #eef7f4; color: #075c52; }
     .deal-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin: 0 0 18px; padding: 13px 15px; border: 1px solid #d7e8e2; border-radius: 12px; background: #fff; }
     .deal-actions strong { display: block; color: #0a7164; }
     .deal-actions small { color: #61717b; }
@@ -74,43 +78,51 @@
   <main id="participants-screen">
     <h1>Участники сделки</h1>
     <p class="hint">Заказчик хранится в стандартном контакте сделки. Подопечный и исполнитель — в отдельных полях сделки.</p>
-    <section class="deal-actions">
-      <div><strong>Ответственный: <span id="responsible-name">загружается…</span></strong><small id="substitution-state">Замещение не задано</small></div>
-      <div class="deal-action-buttons">
-        <button type="button" class="secondary" id="checklist-button">Управление чек-листом</button>
-        <button type="button" class="secondary" id="manual-shift-button">Ручное проставление смены</button>
-        <button type="button" id="transfer-button">Передать клиента</button>
-      </div>
-    </section>
-    <section class="roles" id="roles"></section>
-    <div id="status" class="status">Загружаю данные сделки…</div>
-    <section class="booking-create">
-      <h2>Создать запись</h2>
-      <p>Запись будет создана для подопечного из сделки и попадёт в график назначенной сиделки.</p>
-      <form id="booking-form">
-        <div class="booking-create-grid">
-          <div class="full">
-            <label for="booking-name">Название</label>
-            <input id="booking-name" maxlength="255" required placeholder="Например, уход на дому">
-          </div>
-          <div>
-            <label for="booking-from">С</label>
-            <input id="booking-from" type="datetime-local" required>
-          </div>
-          <div>
-            <label for="booking-to">До</label>
-            <input id="booking-to" type="datetime-local" required>
-          </div>
+    <nav class="app-tabs" role="tablist" aria-label="Разделы сделки">
+      <button type="button" class="app-tab" id="participants-tab" role="tab" aria-selected="true" aria-controls="participants-panel" data-app-tab="participants">Участники сделки</button>
+      <button type="button" class="app-tab" id="schedule-tab" role="tab" aria-selected="false" aria-controls="schedule-panel" data-app-tab="schedule">Расписание</button>
+    </nav>
+    <section id="participants-panel" role="tabpanel" aria-labelledby="participants-tab">
+      <section class="deal-actions">
+        <div><strong>Ответственный: <span id="responsible-name">загружается…</span></strong><small id="substitution-state">Замещение не задано</small></div>
+        <div class="deal-action-buttons">
+          <button type="button" class="secondary" id="checklist-button">Управление чек-листом</button>
+          <button type="button" class="secondary" id="manual-shift-button">Ручное проставление смены</button>
+          <button type="button" id="transfer-button">Передать клиента</button>
         </div>
-        <div id="booking-target" class="booking-target">Подопечный и сиделка загружаются…</div>
-        <div class="booking-actions"><button type="submit" id="create-booking-button">Создать запись</button></div>
-      </form>
+      </section>
+      <section class="roles" id="roles"></section>
+      <div id="status" class="status">Загружаю данные сделки…</div>
     </section>
-    <section class="booking-schedule">
-      <div class="booking-schedule-header"><h2>Расписание</h2><button type="button" class="secondary" id="refresh-schedule-button">Обновить</button></div>
-      <p class="booking-schedule-note">Ближайшие 60 дней для подопечного и назначенной сиделки. Связанные смены отмечены под соответствующими записями.</p>
-      <div id="booking-schedule" aria-live="polite">Загружаю расписание…</div>
-      <div class="schedule-footer"><button type="button" class="secondary" id="open-booking-button">Открыть Онлайн-запись</button></div>
+    <section id="schedule-panel" role="tabpanel" aria-labelledby="schedule-tab" hidden>
+      <section class="booking-create">
+        <h2>Создать запись</h2>
+        <p>Запись будет создана для подопечного из сделки и попадёт в график назначенной сиделки.</p>
+        <form id="booking-form">
+          <div class="booking-create-grid">
+            <div class="full">
+              <label for="booking-name">Название</label>
+              <input id="booking-name" maxlength="255" required placeholder="Например, уход на дому">
+            </div>
+            <div>
+              <label for="booking-from">С</label>
+              <input id="booking-from" type="datetime-local" required>
+            </div>
+            <div>
+              <label for="booking-to">До</label>
+              <input id="booking-to" type="datetime-local" required>
+            </div>
+          </div>
+          <div id="booking-target" class="booking-target">Подопечный и сиделка загружаются…</div>
+          <div class="booking-actions"><button type="submit" id="create-booking-button">Создать запись</button></div>
+        </form>
+      </section>
+      <section class="booking-schedule">
+        <div class="booking-schedule-header"><h2>Расписание</h2><button type="button" class="secondary" id="refresh-schedule-button">Обновить</button></div>
+        <p class="booking-schedule-note">Ближайшие 60 дней для подопечного и назначенной сиделки. Данные хранятся в кэше 1 минуту; «Обновить» запрашивает актуальные данные. Связанные смены отмечены в строках записей.</p>
+        <div id="booking-schedule" aria-live="polite">Откройте вкладку, чтобы загрузить расписание.</div>
+        <div class="schedule-footer"><button type="button" class="secondary" id="open-booking-button">Открыть Онлайн-запись</button></div>
+      </section>
     </section>
   </main>
 
@@ -195,6 +207,9 @@
       const createBookingButton = document.getElementById('create-booking-button');
       const scheduleNode = document.getElementById('booking-schedule');
       const refreshScheduleButton = document.getElementById('refresh-schedule-button');
+      const appTabs = [...document.querySelectorAll('[data-app-tab]')];
+      const participantsPanel = document.getElementById('participants-panel');
+      const schedulePanel = document.getElementById('schedule-panel');
       const substitutionFields = {
         original: 'UF_CRM_SUBSTITUTION_ORIGINAL',
         replacement: 'UF_CRM_SUBSTITUTION_MANAGER',
@@ -218,11 +233,64 @@
       let activeContact;
       let contactsByRole = {};
       let employees = [];
+      let activeAppTab = 'participants';
+      let scheduleLoaded = false;
       const participantsScreen = document.getElementById('participants-screen');
       const serviceScreen = document.getElementById('service-screen');
       const serviceFrame = document.getElementById('service-frame');
       const serviceTitle = document.getElementById('service-title');
       const serviceDescription = document.getElementById('service-description');
+      const scheduleCacheTtl = 60 * 1000;
+
+      function scheduleCacheKey(recipientId, resourceId) {
+        return `deal-booking-schedule:v1:${dealId}:${Number(recipientId)}:${Number(resourceId)}`;
+      }
+
+      function readScheduleCache(recipientId, resourceId) {
+        try {
+          const cached = JSON.parse(sessionStorage.getItem(scheduleCacheKey(recipientId, resourceId)) || 'null');
+          if (!cached || !Array.isArray(cached.bookings) || !Array.isArray(cached.links) || Number(cached.expiresAt) <= Date.now()) return null;
+          return cached;
+        } catch (error) {
+          return null;
+        }
+      }
+
+      function writeScheduleCache(recipientId, resourceId, bookings, linksByBooking) {
+        try {
+          const links = [...linksByBooking.entries()].map(([bookingId, link]) => ({
+            bookingId,
+            shiftId: Number(link?.shift?.ID)
+          })).filter(link => link.bookingId && link.shiftId);
+          sessionStorage.setItem(scheduleCacheKey(recipientId, resourceId), JSON.stringify({
+            expiresAt: Date.now() + scheduleCacheTtl,
+            bookings,
+            links
+          }));
+        } catch (error) {
+          console.warn('Не удалось сохранить кэш расписания:', error);
+        }
+      }
+
+      function removeScheduleCache(recipientId, resourceId) {
+        try { sessionStorage.removeItem(scheduleCacheKey(recipientId, resourceId)); }
+        catch (error) { console.warn('Не удалось очистить кэш расписания:', error); }
+      }
+
+      function linksFromCache(links) {
+        return new Map((Array.isArray(links) ? links : []).map(link => [Number(link.bookingId), {
+          shift: { ID: Number(link.shiftId) }
+        }]));
+      }
+
+      function setAppTab(tabName) {
+        activeAppTab = tabName;
+        const isSchedule = tabName === 'schedule';
+        participantsPanel.hidden = isSchedule;
+        schedulePanel.hidden = !isSchedule;
+        appTabs.forEach(tab => tab.setAttribute('aria-selected', String(tab.dataset.appTab === tabName)));
+        if (isSchedule && !scheduleLoaded) refreshSchedule();
+      }
 
       function openService({ title, description, url }) {
         serviceTitle.textContent = title;
@@ -707,12 +775,21 @@
         }).join('');
       }
 
-      async function refreshSchedule() {
+      async function refreshSchedule({ force = false } = {}) {
         const recipient = contactsByRole.recipient;
         const resourceId = Number(deal?.[substitutionFields.resourceId]);
         if (!recipient || !resourceId) {
           renderSchedule([], 'Назначьте подопечного и сиделку — тогда здесь появится расписание.');
+          scheduleLoaded = true;
           return;
+        }
+        if (!force) {
+          const cached = readScheduleCache(recipient.ID, resourceId);
+          if (cached) {
+            renderSchedule(cached.bookings, '', linksFromCache(cached.links));
+            scheduleLoaded = true;
+            return;
+          }
         }
         const timezone = 'Asia/Vladivostok';
         const today = bookingDateParts(Math.floor(Date.now() / 1000), timezone);
@@ -732,11 +809,13 @@
             .filter(booking => (booking.resourceIds || []).some(id => Number(id) === resourceId))
             .sort((left, right) => Number(left?.datePeriod?.from?.timestamp) - Number(right?.datePeriod?.from?.timestamp));
           const linksByBooking = await loadShiftLinks(bookings);
+          writeScheduleCache(recipient.ID, resourceId, bookings, linksByBooking);
           renderSchedule(bookings, '', linksByBooking);
         } catch (error) {
           console.warn('Не удалось загрузить расписание:', error);
           renderSchedule([], 'Не удалось загрузить расписание. Попробуйте обновить ещё раз.');
         } finally {
+          scheduleLoaded = true;
           refreshScheduleButton.disabled = false;
         }
       }
@@ -774,7 +853,8 @@
         contactsByRole = contacts;
         render(contacts);
         renderBookingTarget();
-        await refreshSchedule();
+        scheduleLoaded = false;
+        if (activeAppTab === 'schedule') await refreshSchedule();
       }
 
       function openDialog(roleKey) {
@@ -851,7 +931,8 @@
         });
       });
       document.getElementById('back-to-participants-button').addEventListener('click', returnToParticipants);
-      refreshScheduleButton.addEventListener('click', () => refreshSchedule());
+      appTabs.forEach(tab => tab.addEventListener('click', () => setAppTab(tab.dataset.appTab)));
+      refreshScheduleButton.addEventListener('click', () => refreshSchedule({ force: true }));
 
       bookingForm.addEventListener('submit', async event => {
         event.preventDefault();
@@ -894,7 +975,9 @@
           bookingFrom.value = '';
           bookingTo.value = '';
           setBookingDefaults();
-          await refreshSchedule();
+          removeScheduleCache(recipient.ID, resourceId);
+          scheduleLoaded = false;
+          await refreshSchedule({ force: true });
         } catch (error) { showError(error); }
         finally { renderBookingTarget(); }
       });

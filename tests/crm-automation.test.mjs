@@ -80,8 +80,12 @@ test('server and deal widget contain required integration calls', async () => {
   assert.match(widget, /Создать запись/);
   assert.match(widget, /Расписание/);
   assert.match(widget, /Ближайшие 60 дней/);
+  assert.match(widget, /data-app-tab="participants"/);
+  assert.match(widget, /data-app-tab="schedule"/);
+  assert.match(widget, /sessionStorage/);
+  assert.match(widget, /scheduleCacheTtl = 60 \* 1000/);
   assert.match(widget, /refreshSchedule/);
-  assert.match(widget, /Связанные смены отмечены под соответствующими записями/);
+  assert.match(widget, /Связанные смены отмечены в строках записей/);
   assert.match(widget, /filter: \{ name \}/);
   assert.match(widget, /Ошибка: каталог ресурсов недоступен\./);
   assert.match(widget, /Готово: контакт назначен\./);
