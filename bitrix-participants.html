@@ -44,6 +44,8 @@
     .schedule-item { display: grid; grid-template-columns: 104px minmax(0, 1fr); gap: 12px; padding: 10px 0; border-bottom: 1px solid #edf3f1; }
     .schedule-item-time { color: #087465; font-weight: 700; white-space: nowrap; }
     .schedule-item-name { font-weight: 600; }
+    .schedule-item-meta { margin-top: 3px; color: #61717b; font-size: 12px; }
+    .schedule-item-meta.exact { color: #087465; }
     .schedule-empty { margin: 0; padding: 10px 0; color: #61717b; }
     .schedule-footer { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 14px; }
     .service-screen { max-width: 1200px; }
@@ -106,7 +108,7 @@
     </section>
     <section class="booking-schedule">
       <div class="booking-schedule-header"><h2>Расписание</h2><button type="button" class="secondary" id="refresh-schedule-button">Обновить</button></div>
-      <p class="booking-schedule-note">Ближайшие 60 дней для подопечного и назначенной сиделки. Список находит график по контакту подопечного.</p>
+      <p class="booking-schedule-note">Ближайшие 60 дней для подопечного и назначенной сиделки. Однозначно совпадающие смены привязываются автоматически.</p>
       <div id="booking-schedule" aria-live="polite">Загружаю расписание…</div>
       <div class="schedule-footer"><button type="button" class="secondary" id="open-booking-button">Открыть Онлайн-запись</button></div>
     </section>
@@ -200,6 +202,16 @@
         comment: 'UF_CRM_SUBSTITUTION_COMMENT',
         resourceId: 'UF_CRM_CARE_RESOURCE_ID'
       };
+      const shiftLinkFields = {
+        categoryId: 6,
+        parentDeal: 'UF_CRM_1787843951',
+        startsAt: 'UF_CRM_1787823737',
+        endsAt: 'UF_CRM_1787823806',
+        bookingId: 'UF_CRM_CARE_BOOKING_ID',
+        recipient: 'UF_CRM_CARE_RECIPIENT',
+        executor: 'UF_CRM_CARE_EXECUTOR'
+      };
+      const autoMatchToleranceSeconds = 5 * 60;
       let b24;
       let dealId;
       let deal;
@@ -207,6 +219,7 @@
       let activeContact;
       let contactsByRole = {};
       let employees = [];
+      let shiftLinkFieldAvailable;
       const participantsScreen = document.getElementById('participants-screen');
       const serviceScreen = document.getElementById('service-screen');
       const serviceFrame = document.getElementById('service-frame');
@@ -633,7 +646,109 @@
         return Array.isArray(result?.booking) ? result.booking : [];
       }
 
-      function renderSchedule(bookings, message = '') {
+      function bookingId(booking) {
+        const id = Number(booking?.id ?? booking?.ID ?? booking?.bookingId);
+        return Number.isInteger(id) && id > 0 ? id : 0;
+      }
+
+      function entityId(value) {
+        const raw = Array.isArray(value) ? value[0] : value;
+        const id = Number(String(raw || '').replace(/\D/g, ''));
+        return Number.isInteger(id) && id > 0 ? id : 0;
+      }
+
+      function dealDateTimestamp(value) {
+        const raw = String(value || '').trim();
+        if (!raw) return 0;
+        if (/(?:Z|[+-]\d{2}:\d{2})$/i.test(raw)) {
+          const parsed = Date.parse(raw);
+          if (Number.isFinite(parsed)) return Math.floor(parsed / 1000);
+        }
+        return bookingTimestamp(raw.replace(' ', 'T').slice(0, 16), 'Asia/Vladivostok');
+      }
+
+      function dealList(result) {
+        if (Array.isArray(result)) return result;
+        return Array.isArray(result?.result) ? result.result : [];
+      }
+
+      function bookingPeriod(booking) {
+        return {
+          from: Number(booking?.datePeriod?.from?.timestamp) || 0,
+          to: Number(booking?.datePeriod?.to?.timestamp) || 0
+        };
+      }
+
+      function matchShiftToBooking(shift, booking) {
+        const recipient = contactsByRole.recipient;
+        const executor = contactsByRole.executor;
+        if (!recipient || !executor) return null;
+        if (entityId(shift?.[shiftLinkFields.recipient]) !== Number(recipient.ID)) return null;
+        if (entityId(shift?.[shiftLinkFields.executor]) !== Number(executor.ID)) return null;
+        const shiftStart = dealDateTimestamp(shift?.[shiftLinkFields.startsAt]);
+        const shiftEnd = dealDateTimestamp(shift?.[shiftLinkFields.endsAt]);
+        const period = bookingPeriod(booking);
+        if (!shiftStart || !period.from) return null;
+        const startsDifference = Math.abs(shiftStart - period.from);
+        const endsDifference = shiftEnd && period.to ? Math.abs(shiftEnd - period.to) : Infinity;
+        if (startsDifference === 0) return { confidence: 'exact' };
+        if (startsDifference <= autoMatchToleranceSeconds && shiftEnd && endsDifference <= autoMatchToleranceSeconds) return { confidence: 'near' };
+        return null;
+      }
+
+      async function hasShiftLinkField() {
+        if (typeof shiftLinkFieldAvailable === 'boolean') return shiftLinkFieldAvailable;
+        const fields = await call('crm.deal.userfield.list', { order: { ID: 'ASC' } });
+        shiftLinkFieldAvailable = Array.isArray(fields) && fields.some(field => field.FIELD_NAME === shiftLinkFields.bookingId);
+        return shiftLinkFieldAvailable;
+      }
+
+      async function syncShiftLinks(bookings) {
+        if (!bookings.length || !dealId) return new Map();
+        if (!await hasShiftLinkField()) {
+          console.warn(`Для автосопоставления смен не найдено поле ${shiftLinkFields.bookingId}. Переустановите приложение «Участники сделки».`);
+          return new Map();
+        }
+        const result = await call('crm.deal.list', {
+          order: { ID: 'ASC' },
+          filter: { CATEGORY_ID: shiftLinkFields.categoryId, [shiftLinkFields.parentDeal]: String(dealId) },
+          select: [
+            'ID', 'TITLE', shiftLinkFields.bookingId, shiftLinkFields.startsAt,
+            shiftLinkFields.endsAt, shiftLinkFields.recipient, shiftLinkFields.executor
+          ]
+        });
+        const shifts = dealList(result);
+        const linkedByBooking = new Map();
+        const availableShifts = [];
+        for (const shift of shifts) {
+          const linkedBookingId = Number(shift?.[shiftLinkFields.bookingId]);
+          if (linkedBookingId > 0) linkedByBooking.set(linkedBookingId, { shift, confidence: 'saved' });
+          else availableShifts.push(shift);
+        }
+        const candidates = new Map();
+        const usage = new Map();
+        for (const booking of bookings) {
+          const id = bookingId(booking);
+          if (!id || linkedByBooking.has(id)) continue;
+          const matches = availableShifts
+            .map(shift => ({ shift, match: matchShiftToBooking(shift, booking) }))
+            .filter(candidate => candidate.match);
+          candidates.set(id, matches);
+          for (const candidate of matches) usage.set(String(candidate.shift.ID), (usage.get(String(candidate.shift.ID)) || 0) + 1);
+        }
+        for (const booking of bookings) {
+          const id = bookingId(booking);
+          const matches = candidates.get(id) || [];
+          if (matches.length !== 1 || usage.get(String(matches[0].shift.ID)) !== 1) continue;
+          const { shift, match } = matches[0];
+          await call('crm.deal.update', { id: Number(shift.ID), fields: { [shiftLinkFields.bookingId]: id } });
+          shift[shiftLinkFields.bookingId] = id;
+          linkedByBooking.set(id, { shift, confidence: match.confidence });
+        }
+        return linkedByBooking;
+      }
+
+      function renderSchedule(bookings, message = '', linksByBooking = new Map()) {
         if (message) {
           scheduleNode.innerHTML = `<p class="schedule-empty">${escapeHtml(message)}</p>`;
           return;
@@ -656,7 +771,9 @@
             const from = booking?.datePeriod?.from || {};
             const to = booking?.datePeriod?.to || {};
             const timezone = from.timezone || to.timezone || group.timezone;
-            return `<div class="schedule-item"><div class="schedule-item-time">${escapeHtml(formatBookingTime(from.timestamp, timezone))}–${escapeHtml(formatBookingTime(to.timestamp, timezone))}</div><div class="schedule-item-name">${escapeHtml(booking.name || 'Без названия')}</div></div>`;
+            const link = linksByBooking.get(bookingId(booking));
+            const linkText = link ? `Смена №${link.shift.ID}${link.confidence === 'exact' ? ' — привязана автоматически' : link.confidence === 'near' ? ' — привязана автоматически (время до 5 минут)' : ''}` : '';
+            return `<div class="schedule-item"><div class="schedule-item-time">${escapeHtml(formatBookingTime(from.timestamp, timezone))}–${escapeHtml(formatBookingTime(to.timestamp, timezone))}</div><div><div class="schedule-item-name">${escapeHtml(booking.name || 'Без названия')}</div>${linkText ? `<div class="schedule-item-meta ${link.confidence === 'exact' ? 'exact' : ''}">${escapeHtml(linkText)}</div>` : ''}</div></div>`;
           }).join('');
           return `<section class="schedule-day"><h3>${escapeHtml(formatBookingDay(group.timestamp, group.timezone))}</h3>${items}</section>`;
         }).join('');
@@ -686,7 +803,8 @@
           const bookings = scheduleBookings(result)
             .filter(booking => (booking.resourceIds || []).some(id => Number(id) === resourceId))
             .sort((left, right) => Number(left?.datePeriod?.from?.timestamp) - Number(right?.datePeriod?.from?.timestamp));
-          renderSchedule(bookings);
+          const linksByBooking = await syncShiftLinks(bookings);
+          renderSchedule(bookings, '', linksByBooking);
         } catch (error) {
           console.warn('Не удалось загрузить расписание:', error);
           renderSchedule([], 'Не удалось загрузить расписание. Попробуйте обновить ещё раз.');

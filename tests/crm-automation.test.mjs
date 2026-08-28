@@ -64,6 +64,11 @@ test('server and deal widget contain required integration calls', async () => {
   assert.match(widget, /filter: \{ name: 'Сиделка' \}/);
   assert.match(widget, /isMain: 'Y'/);
   assert.match(widget, /Открыть Онлайн-запись/);
+  assert.match(widget, /UF_CRM_1787843951/);
+  assert.match(widget, /UF_CRM_1787823737/);
+  assert.match(widget, /UF_CRM_CARE_BOOKING_ID/);
+  assert.match(widget, /syncShiftLinks/);
+  assert.match(widget, /autoMatchToleranceSeconds/);
   assert.match(widget, /Управление чек-листом/);
   assert.match(widget, /Ручное проставление смены/);
   assert.match(widget, /sitters\.blizkie-vl\.ru\/checklist/);
@@ -73,7 +78,7 @@ test('server and deal widget contain required integration calls', async () => {
   assert.match(widget, /Расписание/);
   assert.match(widget, /Ближайшие 60 дней/);
   assert.match(widget, /refreshSchedule/);
-  assert.match(widget, /находит график по контакту подопечного/);
+  assert.match(widget, /Однозначно совпадающие смены привязываются автоматически/);
   assert.match(widget, /filter: \{ name \}/);
   assert.match(widget, /Ошибка: каталог ресурсов недоступен\./);
   assert.match(widget, /Готово: контакт назначен\./);
