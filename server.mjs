@@ -435,7 +435,8 @@ function sameShiftSignature(left, right) {
 
 async function hasShiftBookingLinkField() {
   const now = Date.now();
-  if (now - shiftBookingFieldState.checkedAt < 5 * 60 * 1000) return shiftBookingFieldState.available;
+  const recheckAfter = shiftBookingFieldState.available ? 5 * 60 * 1000 : 15 * 1000;
+  if (now - shiftBookingFieldState.checkedAt < recheckAfter) return shiftBookingFieldState.available;
   const fields = indexedValues(await bitrixCall('crm.deal.userfield.list', { order: { ID: 'ASC' } }));
   shiftBookingFieldState = {
     checkedAt: now,
