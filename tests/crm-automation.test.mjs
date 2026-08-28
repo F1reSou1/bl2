@@ -70,6 +70,8 @@ test('server and deal widget contain required integration calls', async () => {
   assert.match(widget, /UF_CRM_1787823737/);
   assert.match(widget, /UF_CRM_CARE_BOOKING_ID/);
   assert.match(widget, /loadShiftLinks/);
+  assert.match(widget, /schedule-item-link/);
+  assert.match(widget, /crm\/deal\/details\/\$\{Number\(id\)\}/);
   assert.match(widget, /Управление чек-листом/);
   assert.match(widget, /Ручное проставление смены/);
   assert.match(widget, /sitters\.blizkie-vl\.ru\/checklist/);

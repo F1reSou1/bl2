@@ -41,11 +41,11 @@
     .schedule-day { margin-top: 14px; }
     .schedule-day:first-child { margin-top: 0; }
     .schedule-day h3 { margin: 0; padding-bottom: 7px; border-bottom: 1px solid #e5eeeb; color: #61717b; font-size: 13px; text-transform: capitalize; }
-    .schedule-item { display: grid; grid-template-columns: 104px minmax(0, 1fr); gap: 12px; padding: 10px 0; border-bottom: 1px solid #edf3f1; }
+    .schedule-item { display: grid; grid-template-columns: 104px minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid #edf3f1; }
     .schedule-item-time { color: #087465; font-weight: 700; white-space: nowrap; }
     .schedule-item-name { font-weight: 600; }
-    .schedule-item-meta { margin-top: 3px; color: #61717b; font-size: 12px; }
-    .schedule-item-meta.exact { color: #087465; }
+    .schedule-item-link { color: #087465; font-size: 13px; font-weight: 600; white-space: nowrap; text-decoration: none; }
+    .schedule-item-link:hover { text-decoration: underline; }
     .schedule-empty { margin: 0; padding: 10px 0; color: #61717b; }
     .schedule-footer { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 14px; }
     .service-screen { max-width: 1200px; }
@@ -67,7 +67,7 @@
     .result { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 9px 0; border-top: 1px solid #edf1f0; }
     .result small { display: block; color: #75838d; }
     .dialog-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 20px; }
-    @media (max-width: 700px) { .roles, .booking-create-grid { grid-template-columns: 1fr; } .booking-create-grid .full { grid-column: auto; } }
+    @media (max-width: 700px) { .roles, .booking-create-grid, .schedule-item { grid-template-columns: 1fr; } .booking-create-grid .full { grid-column: auto; } .schedule-item { gap: 3px; } }
   </style>
 </head>
 <body>
@@ -649,6 +649,11 @@
         return Number.isInteger(id) && id > 0 ? id : 0;
       }
 
+      function dealUrl(id) {
+        const domain = new URLSearchParams(location.search).get('DOMAIN');
+        return domain && id ? `https://${domain}/crm/deal/details/${Number(id)}/` : '';
+      }
+
       function dealList(result) {
         if (Array.isArray(result)) return result;
         return Array.isArray(result?.result) ? result.result : [];
@@ -694,8 +699,9 @@
             const to = booking?.datePeriod?.to || {};
             const timezone = from.timezone || to.timezone || group.timezone;
             const link = linksByBooking.get(bookingId(booking));
-            const linkText = link ? `Смена №${link.shift.ID}${link.confidence === 'exact' ? ' — привязана автоматически' : link.confidence === 'near' ? ' — привязана автоматически (время до 5 минут)' : ''}` : '';
-            return `<div class="schedule-item"><div class="schedule-item-time">${escapeHtml(formatBookingTime(from.timestamp, timezone))}–${escapeHtml(formatBookingTime(to.timestamp, timezone))}</div><div><div class="schedule-item-name">${escapeHtml(booking.name || 'Без названия')}</div>${linkText ? `<div class="schedule-item-meta ${link.confidence === 'exact' ? 'exact' : ''}">${escapeHtml(linkText)}</div>` : ''}</div></div>`;
+            const shiftUrl = link ? dealUrl(link.shift.ID) : '';
+            const shiftLink = shiftUrl ? `<a class="schedule-item-link" href="${escapeHtml(shiftUrl)}" target="_blank" rel="noopener">Смена №${escapeHtml(link.shift.ID)}</a>` : '';
+            return `<div class="schedule-item"><div class="schedule-item-time">${escapeHtml(formatBookingTime(from.timestamp, timezone))}–${escapeHtml(formatBookingTime(to.timestamp, timezone))}</div><div class="schedule-item-name">${escapeHtml(booking.name || 'Без названия')}</div>${shiftLink}</div>`;
           }).join('');
           return `<section class="schedule-day"><h3>${escapeHtml(formatBookingDay(group.timestamp, group.timezone))}</h3>${items}</section>`;
         }).join('');
