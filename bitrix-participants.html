@@ -8,12 +8,14 @@
     :root { color: #24333f; font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
     * { box-sizing: border-box; }
     body { margin: 0; background: #f7faf9; }
+    [hidden] { display: none !important; }
     main { max-width: 940px; margin: 0 auto; padding: 24px; }
     h1 { margin: 0; font-size: 23px; color: #0a7164; }
     .hint { margin: 6px 0 20px; color: #60707d; }
     .deal-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin: 0 0 18px; padding: 13px 15px; border: 1px solid #d7e8e2; border-radius: 12px; background: #fff; }
     .deal-actions strong { display: block; color: #0a7164; }
     .deal-actions small { color: #61717b; }
+    .deal-action-buttons { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
     .roles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
     .role { min-height: 164px; padding: 16px; border: 1px solid #d7e8e2; border-radius: 14px; background: #fff; box-shadow: 0 4px 16px rgba(10, 113, 100, .05); }
     .role h2 { margin: 0 0 8px; font-size: 17px; }
@@ -44,6 +46,11 @@
     .schedule-item-name { font-weight: 600; }
     .schedule-empty { margin: 0; padding: 10px 0; color: #61717b; }
     .schedule-footer { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+    .service-screen { max-width: 1200px; }
+    .service-header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; padding: 13px 15px; border: 1px solid #d7e8e2; border-radius: 12px; background: #fff; }
+    .service-header h1 { font-size: 19px; }
+    .service-header p { margin: 3px 0 0; color: #61717b; }
+    .service-frame { display: block; width: 100%; height: max(640px, calc(100vh - 170px)); border: 1px solid #d7e8e2; border-radius: 14px; background: #fff; }
     dialog { width: min(540px, calc(100% - 28px)); padding: 0; border: 0; border-radius: 16px; box-shadow: 0 20px 65px rgba(22, 35, 47, .28); }
     dialog::backdrop { background: rgba(19, 39, 48, .4); }
     .dialog { padding: 22px; }
@@ -62,12 +69,16 @@
   </style>
 </head>
 <body>
-  <main>
+  <main id="participants-screen">
     <h1>Участники сделки</h1>
     <p class="hint">Заказчик хранится в стандартном контакте сделки. Подопечный и исполнитель — в отдельных полях сделки.</p>
     <section class="deal-actions">
       <div><strong>Ответственный: <span id="responsible-name">загружается…</span></strong><small id="substitution-state">Замещение не задано</small></div>
-      <button type="button" id="transfer-button">Передать клиента</button>
+      <div class="deal-action-buttons">
+        <button type="button" class="secondary" id="checklist-button">Управление чек-листом</button>
+        <button type="button" class="secondary" id="manual-shift-button">Ручное проставление смены</button>
+        <button type="button" id="transfer-button">Передать клиента</button>
+      </div>
     </section>
     <section class="roles" id="roles"></section>
     <div id="status" class="status">Загружаю данные сделки…</div>
@@ -99,6 +110,17 @@
       <div id="booking-schedule" aria-live="polite">Загружаю расписание…</div>
       <div class="schedule-footer"><button type="button" class="secondary" id="open-booking-button">Открыть Онлайн-запись</button></div>
     </section>
+  </main>
+
+  <main id="service-screen" class="service-screen" hidden>
+    <section class="service-header">
+      <div>
+        <h1 id="service-title">Сервис сиделок</h1>
+        <p id="service-description">Страница открыта внутри приложения.</p>
+      </div>
+      <button type="button" class="secondary" id="back-to-participants-button">← К участникам сделки</button>
+    </section>
+    <iframe id="service-frame" class="service-frame" title="Сервис сиделок"></iframe>
   </main>
 
   <dialog id="person-dialog">
@@ -185,6 +207,25 @@
       let activeContact;
       let contactsByRole = {};
       let employees = [];
+      const participantsScreen = document.getElementById('participants-screen');
+      const serviceScreen = document.getElementById('service-screen');
+      const serviceFrame = document.getElementById('service-frame');
+      const serviceTitle = document.getElementById('service-title');
+      const serviceDescription = document.getElementById('service-description');
+
+      function openService({ title, description, url }) {
+        serviceTitle.textContent = title;
+        serviceDescription.textContent = description;
+        serviceFrame.title = title;
+        if (serviceFrame.src !== url) serviceFrame.src = url;
+        participantsScreen.hidden = true;
+        serviceScreen.hidden = false;
+      }
+
+      function returnToParticipants() {
+        serviceScreen.hidden = true;
+        participantsScreen.hidden = false;
+      }
 
       function setStatus(message, isError) {
         status.textContent = message;
@@ -748,6 +789,22 @@
         const domain = new URLSearchParams(location.search).get('DOMAIN');
         if (domain) window.open(`https://${domain}/booking/`, '_blank');
       });
+      document.getElementById('checklist-button').addEventListener('click', () => {
+        openService({
+          title: 'Управление чек-листом',
+          description: 'Чек-лист открыт внутри приложения.',
+          url: 'https://sitters.blizkie-vl.ru/checklist'
+        });
+      });
+      document.getElementById('manual-shift-button').addEventListener('click', () => {
+        if (!Number.isInteger(dealId) || dealId <= 0) return setStatus('Ошибка: сделка ещё не определена.', true);
+        openService({
+          title: 'Ручное проставление смены',
+          description: `Смена для основной сделки №${dealId}.`,
+          url: `https://sitters.blizkie-vl.ru/deals/${dealId}/manual-shift`
+        });
+      });
+      document.getElementById('back-to-participants-button').addEventListener('click', returnToParticipants);
       refreshScheduleButton.addEventListener('click', () => refreshSchedule());
 
       bookingForm.addEventListener('submit', async event => {

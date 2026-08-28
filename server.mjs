@@ -393,7 +393,7 @@ async function ensureNewDealLinks() {
       if (!Number.isInteger(dealId) || dealId <= 0 || cleanText(deal?.COMMENTS)) continue;
       await bitrixCall('crm.deal.update', {
         id: dealId,
-        fields: { COMMENTS: `https://blizkie-sitters.interra.team/deals/${dealId}` }
+        fields: { COMMENTS: `https://sitters.blizkie-vl.ru/deals/${dealId}` }
       });
       updated += 1;
     }
@@ -932,7 +932,7 @@ async function createBitrixDeal(lead) {
   try {
     await bitrixCall('crm.deal.update', {
       id: dealId,
-      fields: { COMMENTS: `https://blizkie-sitters.interra.team/deals/${dealId}` }
+      fields: { COMMENTS: `https://sitters.blizkie-vl.ru/deals/${dealId}` }
     });
   } catch (error) {
     console.error(`Deal link update failed for #${dealId}:`, error.message);

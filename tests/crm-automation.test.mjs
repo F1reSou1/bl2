@@ -33,7 +33,7 @@ test('server and deal widget contain required integration calls', async () => {
     readFile(new URL('../server.mjs', import.meta.url), 'utf8'),
     readFile(new URL('../bitrix-participants.html', import.meta.url), 'utf8')
   ]);
-  for (const method of ['ASSIGNED_BY_ID', 'COMMENTS', 'blizkie-sitters.interra.team/deals/${dealId}']) {
+  for (const method of ['ASSIGNED_BY_ID', 'COMMENTS', 'sitters.blizkie-vl.ru/deals/${dealId}']) {
     assert.ok(server.includes(method), `server must use ${method}`);
   }
   assert.match(server, /ensureNewDealLinks/);
@@ -64,6 +64,11 @@ test('server and deal widget contain required integration calls', async () => {
   assert.match(widget, /filter: \{ name: 'Сиделка' \}/);
   assert.match(widget, /isMain: 'Y'/);
   assert.match(widget, /Открыть Онлайн-запись/);
+  assert.match(widget, /Управление чек-листом/);
+  assert.match(widget, /Ручное проставление смены/);
+  assert.match(widget, /sitters\.blizkie-vl\.ru\/checklist/);
+  assert.match(widget, /deals\/\$\{dealId\}\/manual-shift/);
+  assert.match(widget, /К участникам сделки/);
   assert.match(widget, /Создать запись/);
   assert.match(widget, /Расписание/);
   assert.match(widget, /Ближайшие 60 дней/);
